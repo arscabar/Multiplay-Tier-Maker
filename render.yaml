@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: multiplay-tier-maker
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit

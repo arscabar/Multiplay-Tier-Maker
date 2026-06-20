@@ -1,0 +1,28 @@
+{
+  "name": "multiplay-tier-maker",
+  "version": "1.0.0",
+  "description": "Realtime multiplay TierMaker room builder.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "build:launcher": "powershell -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
+    "check": "node --check server.js && node --check public/app.js && node --check extension/content.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

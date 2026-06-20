@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multiplay Tier Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">메인으로 이동</a>
+
+    <header class="topbar">
+      <div class="brand-lockup">
+        <h1>
+          <button type="button" class="brand-button" id="homeButton">
+            Multiplay Tier Maker
+          </button>
+        </h1>
+      </div>
+      <form class="profile-strip" id="profileForm">
+        <label for="nicknameInput">닉네임</label>
+        <input id="nicknameInput" name="nickname" maxlength="18" autocomplete="nickname" />
+        <button type="submit" class="button button-accent">저장</button>
+        <span class="status-pill" id="connectionStatus" aria-live="polite">연결 중</span>
+      </form>
+    </header>
+
+    <main class="app-shell" id="main">
+      <aside class="control-rail" aria-label="방">
+        <section class="panel panel-prime" aria-labelledby="discoverTitle">
+          <div class="panel-heading">
+            <span class="coordinate">FIND</span>
+            <h2 id="discoverTitle">템플릿 찾기</h2>
+          </div>
+          <form class="stack-form" id="templateSearchForm">
+            <label for="templateSearchInput">찾을 주제</label>
+            <input
+              id="templateSearchInput"
+              name="templateSearch"
+              maxlength="80"
+              placeholder="pokemon, animals, kpop..."
+            />
+            <button type="submit" class="button button-accent wide-button">검색해서 고르기</button>
+          </form>
+          <p class="rail-note" id="templateSearchStatus" aria-live="polite">
+            TierMaker 템플릿 이름을 검색하고 결과에서 바로 방을 열 수 있습니다.
+          </p>
+          <div class="template-preview" id="templatePreview" hidden></div>
+          <div class="template-results" id="templateSearchResults"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="createTitle">
+          <div class="panel-heading">
+            <span class="coordinate">DIRECT</span>
+            <h2 id="createTitle">직접 가져오기</h2>
+          </div>
+          <form class="stack-form" id="createRoomForm">
+            <label for="tierUrlInput">TierMaker 링크</label>
+            <textarea
+              id="tierUrlInput"
+              rows="3"
+              spellcheck="false"
+              placeholder="https://tiermaker.com/create/..."
+            ></textarea>
+            <button type="submit" class="button button-ghost wide-button">링크로 방 열기</button>
+          </form>
+          <p class="rail-note" id="importStatus" aria-live="polite">
+            검색 결과에 없는 템플릿만 링크로 직접 열어주세요.
+          </p>
+        </section>
+
+        <section class="panel" aria-labelledby="roomListTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <span class="coordinate">LIVE</span>
+              <h2 id="roomListTitle">현재 열린 방</h2>
+            </div>
+            <button type="button" class="icon-button" id="refreshRoomsButton" aria-label="방 목록 새로고침">
+              ↻
+            </button>
+          </div>
+          <div class="room-list" id="roomList"></div>
+        </section>
+
+      </aside>
+
+      <section class="workspace" aria-labelledby="workspaceTitle">
+        <div class="workspace-toolbar">
+          <div>
+            <span class="coordinate" id="roomCodeLabel">NO ROOM</span>
+            <h2 id="workspaceTitle">방을 선택하거나 새로 만드세요</h2>
+          </div>
+          <div class="toolbar-actions">
+            <span class="copy-status" id="copyStatus" aria-live="polite"></span>
+            <button type="button" class="button button-ghost" id="addImageButton" disabled>이미지 추가</button>
+            <button type="button" class="button button-ghost" id="addTierButton" disabled>티어 추가</button>
+            <button type="button" class="button button-ghost" id="saveImageButton" disabled>저장하기</button>
+            <button type="button" class="button button-ghost" id="copyRoomButton" disabled>초대 링크</button>
+            <button type="button" class="button button-danger" id="resetRoomButton" disabled>초기화</button>
+            <button type="button" class="button button-danger" id="deleteRoomButton" disabled>방 삭제</button>
+          </div>
+        </div>
+
+        <input type="file" id="imageUploadInput" accept="image/*" hidden />
+
+        <div class="room-player-strip" id="playerList" aria-label="현재 방 참가자" hidden></div>
+
+        <div class="empty-state" id="emptyState">
+          <span class="coordinate">READY</span>
+          <p id="emptyStateText">
+            왼쪽에서 닉네임을 정하고, 템플릿을 검색해 고르거나 열린 방에 들어가
+            같이 정렬을 시작하세요.
+          </p>
+        </div>
+
+        <div class="board-wrap" id="boardWrap" hidden>
+          <div class="tier-board" id="tierBoard" aria-label="티어 보드"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="cursor-layer" id="cursorLayer" aria-hidden="true"></div>
+
+    <div class="image-lightbox" id="imageLightbox" hidden>
+      <button type="button" class="lightbox-backdrop" id="closeLightboxBackdrop" aria-label="확대 이미지 닫기"></button>
+      <figure class="lightbox-panel" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
+        <div class="lightbox-toolbar">
+          <figcaption id="lightboxTitle">이미지</figcaption>
+          <button type="button" class="icon-button" id="closeLightboxButton" aria-label="닫기">×</button>
+        </div>
+        <img id="lightboxImage" alt="" />
+      </figure>
+    </div>
+
+    <div class="tier-dialog" id="tierDialog" hidden>
+      <button type="button" class="dialog-backdrop" id="closeTierDialogBackdrop" aria-label="티어 추가 닫기"></button>
+      <form class="tier-dialog-panel" id="tierDialogForm" role="dialog" aria-modal="true" aria-labelledby="tierDialogTitle">
+        <div class="dialog-toolbar">
+          <h2 id="tierDialogTitle">티어 추가</h2>
+          <button type="button" class="icon-button" id="cancelTierDialogButton" aria-label="닫기">×</button>
+        </div>
+        <label for="tierNameInput">티어 이름</label>
+        <input id="tierNameInput" name="tierName" maxlength="32" autocomplete="off" />
+        <p class="dialog-note" id="tierDialogStatus" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button type="submit" class="button button-accent wide-button">추가</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
