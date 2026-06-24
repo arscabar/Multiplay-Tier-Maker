@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "smoke:templates": "node scripts/smoke-templates.js",
     "build:launcher": "powershell -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
     "check": "node --check server.js && node --check public/app.js && node --check extension/content.js && node -e \"JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))\""
   },
