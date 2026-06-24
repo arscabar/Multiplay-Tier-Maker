@@ -35,12 +35,15 @@ const MAX_SNAPSHOT_ITEMS = 3000;
 const MAX_SNAPSHOT_TIERS = 32;
 const MAX_SNAPSHOT_TITLE_LENGTH = 140;
 const MAX_HTML_IMPORT_LENGTH = 8_000_000;
+const IMAGE_CACHE_TTL_MS = 1000 * 60 * 60;
+const IMAGE_FETCH_TIMEOUT_MS = 15_000;
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const rooms = new Map();
 const socketRooms = new Map();
+const imageCache = new Map();
 
 app.use(express.json({ limit: "10mb" }));
 app.use((req, res, next) => {
@@ -199,19 +202,30 @@ app.delete("/api/rooms/:roomId", async (req, res) => {
 app.get("/api/image", async (req, res) => {
   try {
     const rawUrl = String(req.query.url || "");
-    const imageUrl = new URL(rawUrl);
-    if (!["tiermaker.com", "www.tiermaker.com"].includes(imageUrl.hostname)) {
+    const imageUrl = normalizeTemplateImageUrl(rawUrl);
+    if (!imageUrl) {
       res.status(400).send("Only TierMaker images can be proxied.");
       return;
     }
 
+    const cached = imageCache.get(imageUrl);
+    if (cached && cached.expiresAt > Date.now()) {
+      sendCachedImage(res, cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
     const upstream = await fetch(imageUrl, {
+      signal: controller.signal,
       headers: {
         "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
         accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        referer: "https://tiermaker.com/",
       },
-    });
+    }).finally(() => clearTimeout(timeout));
 
     if (!upstream.ok) {
       res.status(upstream.status).send("Image fetch failed.");
@@ -219,11 +233,24 @@ app.get("/api/image", async (req, res) => {
     }
 
     const contentType = upstream.headers.get("content-type") || "image/png";
+    if (!contentType.startsWith("image/")) {
+      res.status(502).send("Image fetch returned non-image content.");
+      return;
+    }
+
     const buffer = Buffer.from(await upstream.arrayBuffer());
-    res.setHeader("content-type", contentType);
-    res.setHeader("cache-control", "public, max-age=86400");
-    res.send(buffer);
-  } catch (_error) {
+    const cachedImage = {
+      buffer,
+      contentType,
+      expiresAt: Date.now() + IMAGE_CACHE_TTL_MS,
+    };
+    imageCache.set(imageUrl, cachedImage);
+    sendCachedImage(res, cachedImage);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      res.status(504).send("Image fetch timed out.");
+      return;
+    }
     res.status(400).send("Invalid image URL.");
   }
 });
@@ -846,9 +873,9 @@ function parseTierMakerHtml(html, sourceUrl) {
         })
         .get()
         .flat(),
-      ...extractTemplateImageUrlsFromHtml(html),
+      ...extractTemplateImageUrlsFromText(html),
     ]
-      .map((url) => resolveUrl(url, sourceUrl))
+      .map((url) => normalizeTemplateImageUrl(url, sourceUrl))
       .filter(isTemplateImageUrl)
   );
 
@@ -868,12 +895,12 @@ function parseTierMakerHtml(html, sourceUrl) {
   });
 }
 
-function extractTemplateImageUrlsFromHtml(html) {
+function extractTemplateImageUrlsFromText(value) {
   return Array.from(
-    String(html || "").matchAll(
+    String(value || "").matchAll(
       /(?:https?:\/\/(?:www\.)?tiermaker\.com)?\/images\/+(?:media\/)?template_images\/[^"'`\s<>&)]+/gi
     )
-  ).map((match) => match[0]);
+  ).map((match) => cleanExtractedImageUrl(match[0]));
 }
 
 function splitSrcset(value) {
@@ -891,8 +918,11 @@ function parseReaderMarkdown(markdown, sourceUrl) {
     "";
   const title = cleanTitle(titleLine.replace(/^#\s*/, "").replace(/^Title:\s*/i, ""));
   const imageUrls = unique(
-    Array.from(markdown.matchAll(/!\[[^\]]*]\((https?:\/\/[^)]+)\)/g))
-      .map((match) => match[1])
+    [
+      ...Array.from(markdown.matchAll(/!\[[^\]]*]\((https?:\/\/[^)]+)\)/g)).map((match) => match[1]),
+      ...extractTemplateImageUrlsFromText(markdown),
+    ]
+      .map((url) => normalizeTemplateImageUrl(url, sourceUrl))
       .filter(isTemplateImageUrl)
   );
 
@@ -1021,6 +1051,25 @@ function isBlockedHtml(html) {
 
 function isTemplateImageUrl(url) {
   return /https?:\/\/(?:www\.)?tiermaker\.com\/images\/+(?:media\/)?template_images\//i.test(url);
+}
+
+function normalizeTemplateImageUrl(value, baseUrl = "https://tiermaker.com") {
+  const url = resolveUrl(cleanExtractedImageUrl(value), baseUrl);
+  return isTemplateImageUrl(url) ? url : "";
+}
+
+function cleanExtractedImageUrl(value) {
+  return String(value || "")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/g, "&")
+    .replace(/[)\].,;]+$/g, "")
+    .trim();
+}
+
+function sendCachedImage(res, cached) {
+  res.setHeader("content-type", cached.contentType);
+  res.setHeader("cache-control", "public, max-age=3600");
+  res.send(cached.buffer);
 }
 
 function resolveUrl(url, baseUrl) {

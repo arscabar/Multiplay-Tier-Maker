@@ -638,6 +638,7 @@ function renderBoard(room) {
 
 function renderItem(item) {
   const imageSrc = getItemImageSrc(item);
+  const fallbackSrc = getItemFallbackImageSrc(item);
   const displayName = getItemDisplayName(item);
   const active = getItemActiveFocus(item.id);
   const activeStyle = active ? ` style="--active-color:${escapeHtml(active.color)}"` : "";
@@ -646,7 +647,7 @@ function renderItem(item) {
     : "";
   return `
     <div class="tier-item${active ? " is-active" : ""}" draggable="true" data-item-id="${item.id}" aria-label="${escapeHtml(displayName)}"${activeStyle}>
-      <img src="${imageSrc}" alt="${escapeHtml(displayName)}" loading="lazy" />
+      <img src="${imageSrc}" alt="${escapeHtml(displayName)}" loading="lazy" decoding="async"${fallbackSrc ? ` data-fallback-src="${escapeHtml(fallbackSrc)}" referrerpolicy="no-referrer"` : ""} />
       ${activeBadge}
     </div>
   `;
@@ -658,7 +659,13 @@ function getItemImageSrc(item) {
     : `/api/image?url=${encodeURIComponent(item.src)}`;
 }
 
+function getItemFallbackImageSrc(item) {
+  return item.src.startsWith("data:") ? "" : item.src;
+}
+
 function bindItemEvents(item) {
+  const image = item.querySelector("img");
+  image?.addEventListener("error", () => fallbackItemImage(image), { once: true });
   item.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
     setActiveItem(item.dataset.itemId);
@@ -678,6 +685,12 @@ function bindItemEvents(item) {
     state.draggedItemId = null;
     item.classList.remove("is-dragging");
   });
+}
+
+function fallbackItemImage(image) {
+  const fallbackSrc = image.dataset.fallbackSrc;
+  if (!fallbackSrc || image.src === fallbackSrc) return;
+  image.src = fallbackSrc;
 }
 
 function bindDropZoneEvents(zone) {
