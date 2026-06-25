@@ -24,7 +24,15 @@ npm start
 
 빌드된 실행 파일은 `dist\MultiplayTierMaker.exe`에 생성됩니다.
 
-실행하면 로컬 웹서버를 켜고 브라우저를 자동으로 엽니다. PC 밖 친구와 바로 테스트하려면 `cloudflared`가 PATH에 있어야 하며, 있으면 무료 Cloudflare Tunnel 주소도 같이 생성됩니다. 초대 링크는 가능한 경우 이 공개 주소를 사용합니다.
+실행하면 로컬 웹서버를 켜고 브라우저를 자동으로 엽니다. PC 밖 친구와 바로 테스트하려면 Cloudflare Tunnel 주소가 필요합니다. 런처는 `cloudflared`를 다음 순서로 찾습니다.
+
+1. `MULTIPLAY_CLOUDFLARED_PATH` 또는 `CLOUDFLARED_PATH` 환경 변수
+2. 이전에 직접 지정해 저장된 경로
+3. 저장소의 `tools\cloudflared.exe`
+4. 저장소의 `.omx\cloudflared.exe`
+5. Windows PATH의 `cloudflared`
+
+찾지 못하면 EXE 화면에서 자동 다운로드, 직접 경로 입력, 로컬만 실행 중 하나를 선택할 수 있습니다. 공개 주소가 만들어지면 초대 링크도 그 주소를 사용합니다.
 
 ```powershell
 npm run build:launcher
@@ -62,6 +70,12 @@ npm run build:launcher
 ```powershell
 npm start
 npm run tunnel
+```
+
+`npm run tunnel`도 EXE와 같은 방식으로 `cloudflared`를 찾습니다. 없으면 자동 다운로드하거나 경로를 직접 입력할 수 있습니다. 미리 받아두려면 다음 명령을 사용할 수 있습니다.
+
+```powershell
+npm run cloudflared:install
 ```
 
 터널 출력에 나오는 `https://...trycloudflare.com` 주소로 접속하면 다른 인터넷에서도 같이 플레이할 수 있습니다. 이 방식은 배포라기보다 개발용 공개 링크에 가깝고, PC나 터널이 꺼지면 링크도 끊깁니다.

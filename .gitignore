@@ -8,3 +8,4 @@ launcher/obj/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+tools/cloudflared*.exe

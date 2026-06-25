@@ -1,12 +1,13 @@
 {
   "name": "multiplay-tier-maker",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Realtime multiplay TierMaker room builder.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "tunnel": "powershell -ExecutionPolicy Bypass -File scripts/start-tunnel.ps1",
+    "cloudflared:install": "powershell -ExecutionPolicy Bypass -File scripts/install-cloudflared.ps1",
     "smoke:templates": "node scripts/smoke-templates.js",
     "smoke:worldcup": "node scripts/smoke-worldcup.js",
     "build:launcher": "powershell -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
