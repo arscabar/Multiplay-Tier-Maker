@@ -935,7 +935,7 @@ function renderRooms() {
             </div>
             <div class="room-card-actions">
               <button type="button" class="button button-ghost" data-join-room="${room.id}">입장</button>
-              <button type="button" class="button button-danger" data-delete-room="${room.id}"${canDelete ? "" : " disabled"}>삭제</button>
+              ${canDelete ? `<button type="button" class="button button-danger" data-delete-room="${room.id}">삭제</button>` : ""}
             </div>
           </article>
         `;
@@ -981,6 +981,7 @@ function renderWorkspace() {
   els.saveImageButton.disabled = !isTierRoom;
   els.copyRoomButton.disabled = !hasRoom;
   els.resetRoomButton.disabled = !isHost;
+  els.deleteRoomButton.hidden = !isHost;
   els.deleteRoomButton.disabled = !isHost;
   updateZoomControls();
 
