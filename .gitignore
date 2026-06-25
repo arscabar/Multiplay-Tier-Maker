@@ -1,6 +1,7 @@
 node_modules/
 .omx/
 dist/
+logs/
 launcher/bin/
 launcher/obj/
 .env

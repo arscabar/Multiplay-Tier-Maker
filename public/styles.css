@@ -977,7 +977,9 @@ body.room-mode .control-rail {
 }
 
 .worldcup-board {
+  width: min(100%, 1120px);
   min-width: min(100%, 720px);
+  margin-inline: auto;
 }
 
 .worldcup-stage {
@@ -1162,8 +1164,9 @@ body.room-mode .control-rail {
   opacity: 0;
   color: var(--accent-teal) !important;
   font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 1.02rem;
   font-weight: 800;
-  animation: randomReveal 2.6s ease forwards;
+  animation: randomReveal 1.8s ease forwards;
 }
 
 .worldcup-stage.is-complete {
@@ -1202,14 +1205,102 @@ body.room-mode .control-rail {
 
 @keyframes randomReveal {
   0%,
-  68% {
+  36% {
     opacity: 0;
     transform: translateY(4px);
   }
-  82%,
+  58%,
   100% {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (min-width: 901px) {
+  body.worldcup-room .board-wrap {
+    height: calc(100vh - 236px);
+    height: calc(100svh - 236px);
+    padding-block: calc(var(--space) * 1.5);
+  }
+
+  .worldcup-stage {
+    align-content: start;
+    gap: calc(var(--space) * 1.15);
+  }
+
+  .worldcup-header {
+    gap: 4px;
+    padding: 10px 12px;
+  }
+
+  .worldcup-header h3 {
+    font-size: clamp(1.08rem, 1.45vw, 1.35rem);
+  }
+
+  .worldcup-header p {
+    font-size: 0.88rem;
+    line-height: 1.28;
+  }
+
+  .worldcup-match {
+    align-items: start;
+    gap: calc(var(--space) * 1.15);
+  }
+
+  .worldcup-image-button {
+    aspect-ratio: 16 / 10;
+    max-height: min(30vh, 320px);
+  }
+
+  .worldcup-stage.is-resolving .worldcup-image-button {
+    max-height: min(24vh, 240px);
+  }
+
+  .worldcup-choice-body {
+    grid-template-areas:
+      "name button"
+      "meta button";
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px calc(var(--space) * 1.25);
+    padding: 9px 10px;
+  }
+
+  .worldcup-choice-body strong {
+    grid-area: name;
+    font-size: 0.98rem;
+  }
+
+  .worldcup-choice-body .room-meta {
+    grid-area: meta;
+    font-size: 0.78rem;
+  }
+
+  .worldcup-choice-body .button {
+    grid-area: button;
+    min-height: 40px;
+    padding: 8px 14px;
+    width: auto;
+  }
+
+  .worldcup-randomizer {
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: calc(var(--space) * 1.15);
+    padding: 10px 12px;
+  }
+
+  .coin-flip {
+    width: 58px;
+    height: 58px;
+  }
+
+  .worldcup-random-copy strong {
+    font-size: 0.98rem;
+  }
+
+  .worldcup-random-copy span {
+    font-size: 0.88rem;
+    line-height: 1.28;
   }
 }
 

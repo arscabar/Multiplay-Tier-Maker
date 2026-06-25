@@ -1113,10 +1113,10 @@ function renderWorldcup(room) {
         <h3>${isTieBreaking ? "동률입니다. 랜덤 판정 중" : "더 마음에 드는 쪽을 선택하세요"}</h3>
         <p>${isTieBreaking ? "모든 참가자에게 같은 결과가 적용됩니다." : `${totalVotes}/${playerCount}명 선택 · 과반이면 다음 대결로 넘어갑니다.`}</p>
       </div>
+      ${isTieBreaking ? renderWorldcupTieBreak(room, worldcup) : ""}
       <div class="worldcup-match">
         ${pairItems.map((item) => renderWorldcupChoice(item, worldcup, myVote, isTieBreaking)).join("")}
       </div>
-      ${isTieBreaking ? renderWorldcupTieBreak(room, worldcup) : ""}
       <div class="worldcup-progress">
         <span>이번 라운드 남은 후보 ${Number(worldcup.remainingInRound || 0)}개</span>
         <span>다음 라운드 진출 ${Number(worldcup.nextRoundCount || 0)}개</span>

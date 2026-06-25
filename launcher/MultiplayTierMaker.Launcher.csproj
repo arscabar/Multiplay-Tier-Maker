@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MultiplayTierMaker</AssemblyName>
-    <Version>1.1.3</Version>
-    <FileVersion>1.1.3.0</FileVersion>
-    <AssemblyVersion>1.1.3.0</AssemblyVersion>
+    <Version>1.1.4</Version>
+    <FileVersion>1.1.4.0</FileVersion>
+    <AssemblyVersion>1.1.4.0</AssemblyVersion>
   </PropertyGroup>
 </Project>
