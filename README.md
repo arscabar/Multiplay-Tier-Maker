@@ -38,6 +38,8 @@ npm start
 
 포터블 ZIP에는 Node 실행 파일이 포함되므로 별도 Node.js 설치 없이 실행할 수 있습니다. 빌드 PC에 `cloudflared`가 설치되어 있으면 ZIP의 `tools\cloudflared.exe`에도 함께 들어갑니다.
 
+브라우저가 `localhost:3000` 같은 로컬 주소로 열렸다면 Cloudflare Tunnel 공개 주소 생성에 실패했거나 제한 시간 안에 주소를 받지 못한 상태입니다. 이 경우 EXE 창에 표시되는 Cloudflare Tunnel 로그를 확인하세요. 3000번 포트가 이미 다른 프로그램에서 사용 중이면 런처가 3001, 3002처럼 빈 포트를 찾아 실행합니다.
+
 ```powershell
 npm run build:launcher
 ```

@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 
-const string LocalUrl = "http://localhost:3000";
+const int PreferredPort = 3000;
 const string CloudflaredDownloadUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 const string CloudflaredDownloadsPageUrl = "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/";
 
@@ -33,6 +35,9 @@ Console.Title = "Multiplay Tier Maker";
 Console.WriteLine("Multiplay Tier Maker launcher");
 Console.WriteLine($"Project: {appRoot}");
 
+var localPort = await ResolveLocalPort(PreferredPort);
+var localUrl = $"http://localhost:{localPort}";
+
 var nodePath = ResolveNodePath(appRoot);
 if (nodePath is null)
 {
@@ -43,22 +48,28 @@ if (nodePath is null)
     return;
 }
 
-if (!await IsHealthy())
+if (!await IsHealthy(localUrl))
 {
-    serverProcess = StartProcess(nodePath, "server.js", appRoot, redirectOutput: false);
+    serverProcess = StartProcess(
+        nodePath,
+        "server.js",
+        appRoot,
+        redirectOutput: false,
+        new Dictionary<string, string> { ["PORT"] = localPort.ToString() }
+    );
     Console.WriteLine("Starting local web server...");
-    if (!await WaitForHealth(TimeSpan.FromSeconds(12)))
+    if (!await WaitForHealth(localUrl, TimeSpan.FromSeconds(12)))
     {
-        Console.WriteLine("서버 시작에 실패했습니다. 포트 3000이 이미 사용 중인지 확인해주세요.");
+        Console.WriteLine($"서버 시작에 실패했습니다. 포트 {localPort} 사용 상태를 확인해주세요.");
         Cleanup();
         Console.ReadLine();
         return;
     }
 }
 
-Console.WriteLine($"Local URL: {LocalUrl}");
+Console.WriteLine($"Local URL: {localUrl}");
 
-var openUrl = LocalUrl;
+var openUrl = localUrl;
 var cloudflaredPath = ResolveCloudflaredPath(appRoot, cloudflaredPathStorePath);
 if (cloudflaredPath is null)
 {
@@ -68,19 +79,28 @@ if (cloudflaredPath is null)
 if (cloudflaredPath is not null)
 {
     var tunnelUrlSource = new TaskCompletionSource<string>();
-    tunnelProcess = StartProcess(cloudflaredPath, $"tunnel --url {LocalUrl}", appRoot, redirectOutput: true);
-    _ = ReadTunnelOutput(tunnelProcess, tunnelUrlSource, publicUrlPath);
+    var tunnelLogLines = new List<string>();
+    tunnelProcess = StartProcess(cloudflaredPath, $"tunnel --url {localUrl}", appRoot, redirectOutput: true);
+    _ = ReadTunnelOutput(tunnelProcess, tunnelUrlSource, publicUrlPath, tunnelLogLines);
 
-    Console.WriteLine("Starting free Cloudflare tunnel...");
-    var completed = await Task.WhenAny(tunnelUrlSource.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+    Console.WriteLine("Starting free Cloudflare tunnel... 공개 주소를 기다리는 중입니다.");
+    var completed = await Task.WhenAny(tunnelUrlSource.Task, WaitForProcessExit(tunnelProcess), Task.Delay(TimeSpan.FromSeconds(60)));
     if (completed == tunnelUrlSource.Task)
     {
         openUrl = tunnelUrlSource.Task.Result;
         Console.WriteLine($"Public URL: {openUrl}");
     }
+    else if (tunnelProcess.HasExited)
+    {
+        Console.WriteLine($"Cloudflare Tunnel 실행이 실패했습니다. ExitCode: {tunnelProcess.ExitCode}");
+        PrintTunnelLog(tunnelLogLines);
+        Console.WriteLine("로컬 주소만 엽니다. 다른 인터넷에서는 접속할 수 없습니다.");
+    }
     else
     {
-        Console.WriteLine("Public tunnel URL is not ready yet. Local URL will open first.");
+        Console.WriteLine("60초 안에 공개 주소가 만들어지지 않았습니다.");
+        PrintTunnelLog(tunnelLogLines);
+        Console.WriteLine("로컬 주소만 엽니다. 네트워크나 방화벽이 Cloudflare Tunnel 연결을 막는지 확인하세요.");
     }
 }
 else
@@ -123,7 +143,13 @@ static string FindAppRoot()
     throw new FileNotFoundException("server.js를 찾지 못했습니다. exe를 프로젝트 폴더 안에서 실행해주세요.");
 }
 
-static Process StartProcess(string fileName, string arguments, string workingDirectory, bool redirectOutput)
+static Process StartProcess(
+    string fileName,
+    string arguments,
+    string workingDirectory,
+    bool redirectOutput,
+    IReadOnlyDictionary<string, string>? environment = null
+)
 {
     var info = new ProcessStartInfo
     {
@@ -135,6 +161,13 @@ static Process StartProcess(string fileName, string arguments, string workingDir
         RedirectStandardError = redirectOutput,
         RedirectStandardOutput = redirectOutput,
     };
+    if (environment is not null)
+    {
+        foreach (var pair in environment)
+        {
+            info.Environment[pair.Key] = pair.Value;
+        }
+    }
     return Process.Start(info) ?? throw new InvalidOperationException($"{fileName} 실행에 실패했습니다.");
 }
 
@@ -304,13 +337,25 @@ static string? FindCommandPath(string command)
     return null;
 }
 
-static async Task<bool> IsHealthy()
+static async Task<int> ResolveLocalPort(int preferredPort)
+{
+    for (var port = preferredPort; port < preferredPort + 30; port++)
+    {
+        var localUrl = $"http://localhost:{port}";
+        if (await IsHealthy(localUrl)) return port;
+        if (IsPortAvailable(port)) return port;
+    }
+
+    throw new InvalidOperationException($"{preferredPort}~{preferredPort + 29} 포트 중 사용할 수 있는 포트를 찾지 못했습니다.");
+}
+
+static bool IsPortAvailable(int port)
 {
     try
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(1200) };
-        using var response = await client.GetAsync($"{LocalUrl}/healthz");
-        return response.IsSuccessStatusCode;
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        return true;
     }
     catch
     {
@@ -318,18 +363,45 @@ static async Task<bool> IsHealthy()
     }
 }
 
-static async Task<bool> WaitForHealth(TimeSpan timeout)
+static async Task<bool> IsHealthy(string localUrl)
+{
+    try
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(1200) };
+        using var response = await client.GetAsync($"{localUrl}/healthz");
+        if (!response.IsSuccessStatusCode) return false;
+        var body = await response.Content.ReadAsStringAsync();
+        return Regex.IsMatch(body, @"""ok""\s*:\s*true", RegexOptions.IgnoreCase);
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static async Task<bool> WaitForHealth(string localUrl, TimeSpan timeout)
 {
     var until = DateTime.UtcNow + timeout;
     while (DateTime.UtcNow < until)
     {
-        if (await IsHealthy()) return true;
+        if (await IsHealthy(localUrl)) return true;
         await Task.Delay(350);
     }
     return false;
 }
 
-static async Task ReadTunnelOutput(Process process, TaskCompletionSource<string> urlSource, string publicUrlPath)
+static async Task WaitForProcessExit(Process process)
+{
+    try
+    {
+        await process.WaitForExitAsync();
+    }
+    catch
+    {
+    }
+}
+
+static async Task ReadTunnelOutput(Process process, TaskCompletionSource<string> urlSource, string publicUrlPath, List<string> logLines)
 {
     var regex = new Regex(@"https://[-a-z0-9]+\.trycloudflare\.com", RegexOptions.IgnoreCase);
 
@@ -339,6 +411,11 @@ static async Task ReadTunnelOutput(Process process, TaskCompletionSource<string>
         {
             var line = await reader.ReadLineAsync();
             if (line is null) break;
+            lock (logLines)
+            {
+                logLines.Add(line);
+                if (logLines.Count > 24) logLines.RemoveAt(0);
+            }
             var match = regex.Match(line);
             if (match.Success)
             {
@@ -350,6 +427,22 @@ static async Task ReadTunnelOutput(Process process, TaskCompletionSource<string>
     }
 
     await Task.WhenAny(ReadStreamAsync(process.StandardError), ReadStreamAsync(process.StandardOutput));
+}
+
+static void PrintTunnelLog(List<string> logLines)
+{
+    List<string> snapshot;
+    lock (logLines)
+    {
+        snapshot = logLines.ToList();
+    }
+
+    if (snapshot.Count == 0) return;
+    Console.WriteLine("Cloudflare Tunnel log:");
+    foreach (var line in snapshot.TakeLast(12))
+    {
+        Console.WriteLine(line);
+    }
 }
 
 static void OpenBrowser(string url)

@@ -9,6 +9,7 @@ $version = [string]$packageJson.version
 $portableName = "MultiplayTierMaker-v$version-win-x64"
 $portableRoot = Join-Path $output $portableName
 $zipPath = Join-Path $output "$portableName.zip"
+$cloudflaredDownloadUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
@@ -43,13 +44,20 @@ $nodeTarget = Join-Path $portableRoot "tools\node"
 New-Item -ItemType Directory -Force -Path $nodeTarget | Out-Null
 Copy-Item -LiteralPath $nodeCommand.Source -Destination (Join-Path $nodeTarget "node.exe") -Force
 
-$cloudflaredCommand = Get-Command cloudflared -ErrorAction SilentlyContinue
-if ($cloudflaredCommand) {
-    $cloudflaredTarget = Join-Path $portableRoot "tools"
-    New-Item -ItemType Directory -Force -Path $cloudflaredTarget | Out-Null
-    Copy-Item -LiteralPath $cloudflaredCommand.Source -Destination (Join-Path $cloudflaredTarget "cloudflared.exe") -Force
-} else {
-    Write-Host "cloudflared.exe was not found. The launcher can still download it on first run."
+$cloudflaredTarget = Join-Path $portableRoot "tools"
+$cloudflaredPackagePath = Join-Path $cloudflaredTarget "cloudflared.exe"
+New-Item -ItemType Directory -Force -Path $cloudflaredTarget | Out-Null
+try {
+    Write-Host "Downloading official cloudflared for portable package..."
+    Invoke-WebRequest -Uri $cloudflaredDownloadUrl -OutFile $cloudflaredPackagePath -UseBasicParsing
+} catch {
+    Write-Host "cloudflared download failed. Falling back to local installation if available."
+    $cloudflaredCommand = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if ($cloudflaredCommand) {
+        Copy-Item -LiteralPath $cloudflaredCommand.Source -Destination $cloudflaredPackagePath -Force
+    } else {
+        Write-Host "cloudflared.exe was not found. The launcher can still download it on first run."
+    }
 }
 
 Copy-Item -LiteralPath (Join-Path $portableRoot "MultiplayTierMaker.exe") -Destination (Join-Path $output "MultiplayTierMaker.exe") -Force
