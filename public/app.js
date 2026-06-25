@@ -1,5 +1,14 @@
 const socket = io();
 
+const MIN_BOARD_ZOOM = 0.65;
+const MAX_BOARD_ZOOM = 1.15;
+const BOARD_ZOOM_STEP = 0.1;
+const ITEM_LOCK_TTL_MS = 30_000;
+const HOST_TOKEN_KEY_PREFIX = "mtm:hostToken:";
+const ROOM_MODE_TIERMAKER = "tiermaker";
+const ROOM_MODE_WORLDCUP = "worldcup";
+const WORLDCUP_BRACKET_SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+
 const state = {
   nickname: localStorage.getItem("mtm:nickname") || "",
   currentRoom: null,
@@ -13,6 +22,14 @@ const state = {
   activeItems: {},
   cursors: new Map(),
   lastCursorSentAt: 0,
+  selectedItemId: null,
+  boardZoom: readStoredBoardZoom(),
+  gameMode: normalizeGameMode(localStorage.getItem("mtm:gameMode")),
+  isCreatingRoom: false,
+  roomCreateProgress: 0,
+  roomCreateStartedAt: 0,
+  roomCreateTimer: null,
+  roomCreateHideTimer: null,
 };
 
 const els = {
@@ -21,6 +38,8 @@ const els = {
   profileForm: document.querySelector("#profileForm"),
   connectionStatus: document.querySelector("#connectionStatus"),
   createRoomForm: document.querySelector("#createRoomForm"),
+  gameModeInputs: document.querySelectorAll('input[name="gameMode"]'),
+  sourceUrlLabel: document.querySelector("#sourceUrlLabel"),
   tierUrlInput: document.querySelector("#tierUrlInput"),
   importStatus: document.querySelector("#importStatus"),
   templateSearchForm: document.querySelector("#templateSearchForm"),
@@ -36,6 +55,10 @@ const els = {
   copyStatus: document.querySelector("#copyStatus"),
   addImageButton: document.querySelector("#addImageButton"),
   addTierButton: document.querySelector("#addTierButton"),
+  zoomControl: document.querySelector(".zoom-control"),
+  zoomOutButton: document.querySelector("#zoomOutButton"),
+  zoomInButton: document.querySelector("#zoomInButton"),
+  zoomLevelLabel: document.querySelector("#zoomLevelLabel"),
   imageUploadInput: document.querySelector("#imageUploadInput"),
   saveImageButton: document.querySelector("#saveImageButton"),
   copyRoomButton: document.querySelector("#copyRoomButton"),
@@ -45,6 +68,7 @@ const els = {
   emptyStateText: document.querySelector("#emptyStateText"),
   boardWrap: document.querySelector("#boardWrap"),
   tierBoard: document.querySelector("#tierBoard"),
+  worldcupBoard: document.querySelector("#worldcupBoard"),
   cursorLayer: document.querySelector("#cursorLayer"),
   imageLightbox: document.querySelector("#imageLightbox"),
   lightboxTitle: document.querySelector("#lightboxTitle"),
@@ -57,10 +81,18 @@ const els = {
   tierDialogStatus: document.querySelector("#tierDialogStatus"),
   cancelTierDialogButton: document.querySelector("#cancelTierDialogButton"),
   closeTierDialogBackdrop: document.querySelector("#closeTierDialogBackdrop"),
+  roomCreateProgress: document.querySelector("#roomCreateProgress"),
+  roomCreateProgressTitle: document.querySelector("#roomCreateProgressTitle"),
+  roomCreateProgressText: document.querySelector("#roomCreateProgressText"),
+  roomCreateProgressBar: document.querySelector("#roomCreateProgressBar"),
+  roomCreateProgressPercent: document.querySelector("#roomCreateProgressPercent"),
+  roomCreateProgressElapsed: document.querySelector("#roomCreateProgressElapsed"),
 };
 
 els.nicknameInput.value = state.nickname;
 setProfileEnabled();
+applyBoardZoom();
+applyGameModeUI();
 loadConfig();
 loadRooms();
 handleTemplateImportFromQuery();
@@ -82,17 +114,26 @@ socket.on("rooms:update", (rooms) => {
 });
 
 socket.on("room:state", (room) => {
+  const wasTieBreaking = Boolean(state.currentRoom?.worldcup?.tieBreak);
   state.currentRoom = room;
   state.pendingRoomId = "";
   state.roomError = "";
   state.activeItems = mapActiveItems(room.activeItems || []);
   state.cursors.clear();
+  if (normalizeGameMode(room.mode) === ROOM_MODE_WORLDCUP) {
+    if (room.worldcup?.tieBreak) {
+      els.copyStatus.textContent = "동률 판정 중";
+    } else if (wasTieBreaking) {
+      els.copyStatus.textContent = "다음 대결";
+    }
+  }
   renderWorkspace();
 });
 
 socket.on("room:error", ({ message }) => {
   state.currentRoom = null;
   state.roomError = message;
+  state.selectedItemId = null;
   setImportStatus(message, true);
   renderWorkspace();
 });
@@ -121,6 +162,12 @@ socket.on("item:focus", ({ activeItems }) => {
   renderItemHighlights();
 });
 
+socket.on("item:blocked", ({ nickname }) => {
+  clearSelectedItem();
+  els.copyStatus.textContent = "사용 중";
+  setImportStatus(`${nickname || "다른 참가자"}님이 잡고 있는 이미지는 이동할 수 없습니다.`, true);
+});
+
 els.profileForm.addEventListener("submit", (event) => {
   event.preventDefault();
   state.nickname = els.nicknameInput.value.trim().slice(0, 18);
@@ -144,6 +191,14 @@ els.templateSearchForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await searchTemplates(els.templateSearchInput.value);
 });
+els.gameModeInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    state.gameMode = normalizeGameMode(input.value);
+    localStorage.setItem("mtm:gameMode", state.gameMode);
+    applyGameModeUI();
+  });
+});
 els.refreshRoomsButton.addEventListener("click", loadRooms);
 els.homeButton.addEventListener("click", leaveRoomToHome);
 els.addImageButton.addEventListener("click", () => {
@@ -153,9 +208,11 @@ els.addImageButton.addEventListener("click", () => {
 });
 els.imageUploadInput.addEventListener("change", handleImageUpload);
 els.addTierButton.addEventListener("click", openTierDialog);
+els.zoomOutButton.addEventListener("click", () => changeBoardZoom(-BOARD_ZOOM_STEP));
+els.zoomInButton.addEventListener("click", () => changeBoardZoom(BOARD_ZOOM_STEP));
 els.saveImageButton.addEventListener("click", saveBoardImage);
 els.copyRoomButton.addEventListener("click", copyRoomLink);
-els.resetRoomButton.addEventListener("click", () => socket.emit("room:reset"));
+els.resetRoomButton.addEventListener("click", resetRoom);
 els.deleteRoomButton.addEventListener("click", () => {
   const roomId = state.currentRoom?.id;
   if (roomId) deleteRoom(roomId);
@@ -179,9 +236,18 @@ window.addEventListener("pointermove", (event) => {
 });
 window.addEventListener("scroll", renderCursors, { passive: true });
 els.boardWrap.addEventListener("scroll", renderCursors, { passive: true });
+window.setInterval(pruneLocalActiveItems, 5000);
 document.addEventListener("pointerdown", (event) => {
   if (!state.currentRoom) return;
-  if (event.target.closest(".tier-item") || event.target.closest(".image-lightbox")) return;
+  if (
+    event.target.closest(".tier-item") ||
+    event.target.closest(".drop-zone") ||
+    event.target.closest(".tier-label-cell") ||
+    event.target.closest(".image-lightbox")
+  ) {
+    return;
+  }
+  clearSelectedItem();
   clearActiveItem();
 });
 document.addEventListener("keydown", (event) => {
@@ -210,36 +276,53 @@ async function loadConfig() {
 }
 
 async function createRoomFromLink(url, options = {}) {
+  if (state.isCreatingRoom) {
+    const status = options.statusTarget === "search" ? setTemplateSearchStatus : setImportStatus;
+    status("이미 방을 생성하는 중입니다. 잠시만 기다려주세요.");
+    return;
+  }
+
+  const mode = normalizeGameMode(options.mode || inferGameModeFromUrl(url) || state.gameMode);
+  const bracketSize = normalizeWorldcupBracketSize(options.bracketSize);
   const status = options.statusTarget === "search" ? setTemplateSearchStatus : setImportStatus;
-  status("TierMaker 링크를 읽는 중입니다...");
+  const progressLabel = getRoomCreationProgressLabel(mode, bracketSize);
+  status(`${progressLabel}을 여는 중입니다...`);
+  startRoomCreateProgress(progressLabel);
+
   try {
     const response = await fetch("/api/rooms", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, mode, bracketSize }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "가져오기에 실패했습니다.");
+    const roomLabel = getRoomBracketLabel(data.room);
     status(
       data.existing
-        ? "이미 열린 티어메이커입니다. 기존 방으로 입장합니다."
-        : "방이 열렸습니다. 바로 입장합니다."
+        ? `이미 열린 ${roomLabel}입니다. 기존 방으로 입장합니다.`
+        : `${roomLabel}이 열렸습니다. 바로 입장합니다.`
     );
+    if (data.hostToken) {
+      saveHostToken(data.room.id, data.hostToken);
+    }
     joinRoom(data.room.id);
+    completeRoomCreateProgress(`${roomLabel} 준비 완료`);
   } catch (error) {
     status(error.message, true);
+    failRoomCreateProgress(error.message);
   }
 }
 
-async function createRoomFromSearchResult(url) {
+async function createRoomFromSearchResult(url, options = {}) {
   if (!requireNickname()) return;
-  setTemplateSearchStatus("선택한 템플릿으로 방을 여는 중입니다...");
-  await createRoomFromLink(url, { statusTarget: "search" });
+  setTemplateSearchStatus("선택한 항목으로 방을 여는 중입니다...");
+  await createRoomFromLink(url, { statusTarget: "search", mode: state.gameMode, bracketSize: options.bracketSize });
 }
 
 async function searchTemplates(query) {
   const term = query.trim();
-  setTemplateSearchStatus(term ? `${term} 템플릿을 찾는 중입니다...` : "검색어를 입력해주세요.");
+  setTemplateSearchStatus(term ? `${term} ${getModeLabel(state.gameMode)} 결과를 찾는 중입니다...` : "검색어를 입력해주세요.");
   if (!term) return;
 
   els.templatePreview.hidden = true;
@@ -249,13 +332,14 @@ async function searchTemplates(query) {
   try {
     const params = new URLSearchParams();
     params.set("q", term);
+    params.set("mode", state.gameMode);
     const response = await fetch(`/api/templates/search?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "검색에 실패했습니다.");
     renderTemplateResults(data.templates || []);
     setTemplateSearchStatus(
       data.templates?.length
-        ? `${data.templates.length}개의 템플릿을 찾았습니다.`
+        ? `${data.templates.length}개의 ${getModeLabel(state.gameMode)} 결과를 찾았습니다.`
         : "검색 결과가 없습니다. 다른 단어로 다시 찾아보세요."
     );
   } catch (error) {
@@ -269,6 +353,7 @@ function renderTemplateResults(templates) {
     return;
   }
 
+  const isWorldcup = state.gameMode === ROOM_MODE_WORLDCUP;
   els.templateSearchResults.innerHTML = templates
     .map(
       (template) => `
@@ -281,7 +366,7 @@ function renderTemplateResults(templates) {
               class="button button-accent"
               data-import-template-result="${escapeHtml(template.url)}"
             >
-              바로 방 만들기
+              ${isWorldcup ? "규모 선택" : "바로 방 만들기"}
             </button>
             <button
               type="button"
@@ -307,18 +392,23 @@ function renderTemplateResults(templates) {
   });
   els.templateSearchResults.querySelectorAll("[data-import-template-result]").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (state.gameMode === ROOM_MODE_WORLDCUP) {
+        await previewTemplate(button.dataset.importTemplateResult, button.closest(".template-card")?.querySelector("strong")?.textContent || "PIKU 이상형월드컵");
+        return;
+      }
       await createRoomFromSearchResult(button.dataset.importTemplateResult);
     });
   });
 }
 
-async function previewTemplate(url, fallbackTitle = "TierMaker Template") {
-  setTemplateSearchStatus("선택한 템플릿을 미리 불러오는 중입니다...");
+async function previewTemplate(url, fallbackTitle = "Template") {
+  setTemplateSearchStatus("선택한 항목을 미리 불러오는 중입니다...");
   els.templatePreview.hidden = false;
   els.templatePreview.innerHTML = `<div class="template-preview-loading">미리보기 로딩 중</div>`;
 
   try {
-    const response = await fetch(`/api/templates/preview?url=${encodeURIComponent(url)}`);
+    const params = new URLSearchParams({ url, mode: state.gameMode });
+    const response = await fetch(`/api/templates/preview?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "미리보기에 실패했습니다.");
     renderTemplatePreview(data.template);
@@ -336,25 +426,27 @@ async function previewTemplate(url, fallbackTitle = "TierMaker Template") {
 function renderTemplatePreview(template) {
   const tiers = template.tiers || [];
   const items = template.items || [];
+  const isWorldcup = normalizeGameMode(template.mode || state.gameMode) === ROOM_MODE_WORLDCUP;
   els.templatePreview.hidden = false;
   els.templatePreview.innerHTML = `
     <article class="template-preview-card">
       <div class="template-preview-head">
         <strong title="${escapeHtml(template.title)}">${escapeHtml(template.title)}</strong>
-        <span class="room-meta">이미지 ${template.imageCount}개 · 티어 ${template.tierCount}줄</span>
+        <span class="room-meta">${escapeHtml(getPreviewMeta(template))}</span>
       </div>
-      <div class="template-thumb-grid" aria-label="템플릿 이미지 미리보기">
+      ${isWorldcup ? "" : `<div class="template-thumb-grid" aria-label="템플릿 이미지 미리보기">
         ${items
           .map(
             (item) => `
               <span class="template-thumb">
-                <img src="${getItemImageSrc(item)}" alt="${escapeHtml(item.alt)}" loading="lazy" />
+                <img src="${getItemImageSrc(item)}" alt="${escapeHtml(item.alt)}" loading="lazy"${getItemFallbackImageSrc(item) ? ` data-fallback-src="${escapeHtml(getItemFallbackImageSrc(item))}" referrerpolicy="no-referrer"` : ""} />
               </span>
             `
           )
           .join("")}
-      </div>
-      <div class="template-tier-preview" aria-label="템플릿 티어 줄">
+      </div>`}
+      ${isWorldcup ? renderWorldcupBracketPicker(template) : ""}
+      ${tiers.length ? `<div class="template-tier-preview" aria-label="템플릿 티어 줄">
         ${tiers
           .map(
             (tier) => `
@@ -362,10 +454,10 @@ function renderTemplatePreview(template) {
             `
           )
           .join("")}
-      </div>
+      </div>` : ""}
       <div class="template-actions">
         <button type="button" class="button button-accent" data-import-template="${escapeHtml(template.sourceUrl)}">
-          이 템플릿으로 방 만들기
+          ${isWorldcup ? "선택한 규모로 방 만들기" : "이 항목으로 방 만들기"}
         </button>
         <a class="button button-ghost" href="${escapeHtml(template.sourceUrl)}" target="_blank" rel="noreferrer">
           원본 사이트 열기
@@ -375,9 +467,57 @@ function renderTemplatePreview(template) {
   `;
 
   const importButton = els.templatePreview.querySelector("[data-import-template]");
-  importButton.addEventListener("click", async () => {
-    await createRoomFromSearchResult(importButton.dataset.importTemplate);
+  els.templatePreview.querySelectorAll("img").forEach((image) => {
+    image.addEventListener("error", () => fallbackItemImage(image), { once: true });
   });
+  importButton.addEventListener("click", async () => {
+    const bracketSize = normalizeWorldcupBracketSize(
+      els.templatePreview.querySelector("[data-worldcup-bracket-select]")?.value
+    );
+    await createRoomFromSearchResult(importButton.dataset.importTemplate, { bracketSize });
+  });
+}
+
+function renderWorldcupBracketPicker(template) {
+  const options = getAvailableWorldcupBracketOptions(template);
+  if (!options.length) return "";
+  const importableOptions = options.filter((option) => option.importable);
+  const templateSize = normalizeWorldcupBracketSize(template.bracketSize || template.defaultBracketSize);
+  const selected =
+    Number(importableOptions.at(-1)?.size || 0) ||
+    (templateSize && options.some((option) => option.size === templateSize) ? templateSize : 0) ||
+    Number(options.at(-1)?.size || 0);
+  return `
+    <label class="template-bracket-picker">
+      <span>월드컵 규모</span>
+      <select data-worldcup-bracket-select>
+        ${options
+          .map(
+            (option) => `
+              <option value="${option.size}"${option.size === selected ? " selected" : ""}${option.importable ? "" : " disabled"}>
+                ${option.size}강${option.importable ? "" : " (후보 부족)"}
+              </option>
+            `
+          )
+          .join("")}
+      </select>
+    </label>
+  `;
+}
+
+function getAvailableWorldcupBracketOptions(template) {
+  const options = Array.isArray(template.bracketOptions) ? template.bracketOptions : [];
+  const enabled = options
+    .filter((option) => option.enabled)
+    .map((option) => ({
+      size: normalizeWorldcupBracketSize(option.size),
+      importable: option.importable !== false,
+    }))
+    .filter((option) => option.size);
+  if (enabled.length) return enabled;
+
+  const count = Number(template.imageCount || template.bracketSize || 0);
+  return WORLDCUP_BRACKET_SIZES.filter((size) => size <= count).map((size) => ({ size }));
 }
 
 function renderTemplateFallbackPreview(template) {
@@ -391,7 +531,7 @@ function renderTemplateFallbackPreview(template) {
       <p class="template-preview-note">${escapeHtml(template.message || "미리보기 정보를 읽지 못했습니다.")}</p>
       <div class="template-actions">
         <button type="button" class="button button-accent" data-import-template="${escapeHtml(template.sourceUrl)}">
-          이 링크로 가져오기 시도
+          이 링크로 방 만들기
         </button>
         <a class="button button-ghost" href="${escapeHtml(template.sourceUrl)}" target="_blank" rel="noreferrer">
           원본 사이트 열기
@@ -411,9 +551,27 @@ function setTemplateSearchStatus(message, isError = false) {
   els.templateSearchStatus.style.color = isError ? "var(--danger)" : "var(--fg-muted)";
 }
 
+function getPreviewMeta(template) {
+  const mode = normalizeGameMode(template?.mode || state.gameMode);
+  if (mode === ROOM_MODE_WORLDCUP) {
+    const available = Number(template.availableItemCount || template.previewItemCount || 0);
+    const maxOption = Math.max(
+      0,
+      ...(template.bracketOptions || [])
+        .filter((option) => option.enabled)
+        .map((option) => Number(option.size || 0))
+    );
+    return `${maxOption ? `${maxOption}강까지 표시` : "규모 선택"} · 자동 확보 후보 ${available}개`;
+  }
+  return `이미지 ${Number(template.imageCount || 0)}개 · 티어 ${Number(template.tierCount || 0)}줄`;
+}
+
 function compactTemplateUrl(url) {
   try {
     const parsed = new URL(url);
+    if (parsed.hostname.includes("piku.co.kr")) {
+      return parsed.pathname.replace(/^\/w\//, "piku/");
+    }
     return parsed.pathname.replace(/^\/create\//, "");
   } catch (_error) {
     return url;
@@ -426,8 +584,14 @@ function handleTemplateImportFromQuery() {
   if (!templateUrl) return;
 
   state.pendingTemplateUrl = templateUrl;
+  const importedMode = inferGameModeFromUrl(templateUrl);
+  if (importedMode) {
+    state.gameMode = importedMode;
+    localStorage.setItem("mtm:gameMode", state.gameMode);
+    applyGameModeUI();
+  }
   els.tierUrlInput.value = templateUrl;
-  setTemplateSearchStatus("원본 사이트에서 선택한 템플릿 링크를 받았습니다.");
+  setTemplateSearchStatus("원본 사이트에서 선택한 링크를 받았습니다.");
 
   if (state.nickname) {
     consumePendingTemplateUrl();
@@ -468,7 +632,7 @@ function joinRoom(roomId) {
   if (!requireNickname()) return;
   window.history.replaceState(null, "", `#room=${encodeURIComponent(roomId)}`);
   applyScreenMode();
-  socket.emit("room:join", { roomId, nickname: state.nickname });
+  socket.emit("room:join", { roomId, nickname: state.nickname, hostToken: getHostToken(roomId) });
 }
 
 function leaveRoomToHome() {
@@ -483,6 +647,7 @@ function returnToHome(message) {
   state.currentRoom = null;
   state.pendingRoomId = "";
   state.roomError = "";
+  state.selectedItemId = null;
   state.activeItems = {};
   state.cursors.clear();
   els.cursorLayer.innerHTML = "";
@@ -511,13 +676,233 @@ function requireNickname() {
 function setProfileEnabled() {
   const hasNickname = Boolean(state.nickname);
   els.createRoomForm.querySelectorAll("button, textarea").forEach((control) => {
-    control.disabled = !hasNickname;
+    control.disabled = !hasNickname || state.isCreatingRoom;
   });
+}
+
+function getRoomCreationProgressLabel(mode, bracketSize = 0) {
+  const normalizedMode = normalizeGameMode(mode);
+  if (normalizedMode !== ROOM_MODE_WORLDCUP) return "티어메이커 방";
+  return bracketSize ? `${bracketSize}강 월드컵 방` : "월드컵 방";
+}
+
+function startRoomCreateProgress(label) {
+  clearRoomCreateTimer();
+  clearRoomCreateHideTimer();
+  state.isCreatingRoom = true;
+  state.roomCreateProgress = 6;
+  state.roomCreateStartedAt = Date.now();
+  setRoomCreationBusy(true);
+
+  els.roomCreateProgress.hidden = false;
+  els.roomCreateProgress.classList.remove("is-error");
+  els.roomCreateProgressTitle.textContent = "방 생성 중";
+  els.roomCreateProgressText.textContent = `${label}을 준비하고 있습니다. 후보 이미지가 많으면 시간이 조금 걸릴 수 있습니다.`;
+  updateRoomCreateProgress(6);
+
+  state.roomCreateTimer = window.setInterval(() => {
+    const elapsed = Date.now() - state.roomCreateStartedAt;
+    const eased = 92 - 86 * Math.exp(-elapsed / 9000);
+    const nextProgress = Math.max(state.roomCreateProgress, Math.min(92, eased));
+    state.roomCreateProgress = nextProgress;
+    updateRoomCreateProgress(nextProgress);
+
+    if (elapsed > 8000) {
+      els.roomCreateProgressText.textContent = `${label} 후보 이미지를 수집하고 있습니다. 큰 월드컵일수록 조금 더 걸립니다.`;
+    } else if (elapsed > 3000) {
+      els.roomCreateProgressText.textContent = `${label} 템플릿 데이터를 불러오는 중입니다.`;
+    }
+  }, 250);
+}
+
+function completeRoomCreateProgress(message = "방 생성 완료") {
+  clearRoomCreateTimer();
+  state.roomCreateProgress = 100;
+  updateRoomCreateProgress(100);
+  els.roomCreateProgress.classList.remove("is-error");
+  els.roomCreateProgressTitle.textContent = "방 생성 완료";
+  els.roomCreateProgressText.textContent = message;
+  state.roomCreateHideTimer = window.setTimeout(() => {
+    hideRoomCreateProgress();
+  }, 650);
+}
+
+function failRoomCreateProgress(message = "방 생성에 실패했습니다.") {
+  clearRoomCreateTimer();
+  els.roomCreateProgress.classList.add("is-error");
+  els.roomCreateProgressTitle.textContent = "방 생성 실패";
+  els.roomCreateProgressText.textContent = message;
+  updateRoomCreateProgress(Math.max(12, state.roomCreateProgress));
+  state.roomCreateHideTimer = window.setTimeout(() => {
+    hideRoomCreateProgress();
+  }, 1800);
+}
+
+function hideRoomCreateProgress() {
+  clearRoomCreateTimer();
+  clearRoomCreateHideTimer();
+  els.roomCreateProgress.hidden = true;
+  els.roomCreateProgress.classList.remove("is-error");
+  state.isCreatingRoom = false;
+  state.roomCreateProgress = 0;
+  setRoomCreationBusy(false);
+  updateRoomCreateProgress(0);
+}
+
+function clearRoomCreateTimer() {
+  if (!state.roomCreateTimer) return;
+  window.clearInterval(state.roomCreateTimer);
+  state.roomCreateTimer = null;
+}
+
+function clearRoomCreateHideTimer() {
+  if (!state.roomCreateHideTimer) return;
+  window.clearTimeout(state.roomCreateHideTimer);
+  state.roomCreateHideTimer = null;
+}
+
+function updateRoomCreateProgress(value) {
+  const progress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  const elapsedSeconds = state.roomCreateStartedAt
+    ? Math.max(0, Math.floor((Date.now() - state.roomCreateStartedAt) / 1000))
+    : 0;
+  els.roomCreateProgressBar.style.width = `${progress}%`;
+  els.roomCreateProgressPercent.textContent = `${progress}%`;
+  els.roomCreateProgressElapsed.textContent = `${elapsedSeconds}초`;
+}
+
+function setRoomCreationBusy(isBusy) {
+  document
+    .querySelectorAll("[data-import-template], [data-import-template-result], #createRoomForm button, #createRoomForm textarea")
+    .forEach((control) => {
+      control.disabled = isBusy;
+    });
+  setProfileEnabled();
+}
+
+function normalizeGameMode(value) {
+  return String(value || ROOM_MODE_TIERMAKER).toLowerCase() === ROOM_MODE_WORLDCUP
+    ? ROOM_MODE_WORLDCUP
+    : ROOM_MODE_TIERMAKER;
+}
+
+function normalizeWorldcupBracketSize(value) {
+  const size = Number(value || 0);
+  return Number.isInteger(size) && size >= 2 && size <= 3000 ? size : 0;
+}
+
+function getRoomBracketLabel(room) {
+  if (normalizeGameMode(room?.mode) !== ROOM_MODE_WORLDCUP) return "방";
+  const bracketSize = Number(room?.bracketSize || room?.imageCount || 0);
+  return bracketSize ? `${bracketSize}강` : "월드컵 방";
+}
+
+function getRoomDisplayTitle(room) {
+  const title = String(room?.title || "방");
+  if (normalizeGameMode(room?.mode) !== ROOM_MODE_WORLDCUP) return title;
+  const bracketLabel = getRoomBracketLabel(room);
+  return bracketLabel === "월드컵 방" ? title : `${title} · ${bracketLabel} 방`;
+}
+
+function inferGameModeFromUrl(value) {
+  try {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const hostname = new URL(withProtocol).hostname.toLowerCase();
+    if (hostname.endsWith("piku.co.kr")) return ROOM_MODE_WORLDCUP;
+    if (hostname.endsWith("tiermaker.com")) return ROOM_MODE_TIERMAKER;
+  } catch (_error) {
+    return "";
+  }
+  return "";
+}
+
+function getModeLabel(mode = state.gameMode) {
+  return normalizeGameMode(mode) === ROOM_MODE_WORLDCUP ? "이상형월드컵" : "티어메이커";
+}
+
+function applyGameModeUI() {
+  els.gameModeInputs.forEach((input) => {
+    input.checked = normalizeGameMode(input.value) === state.gameMode;
+  });
+
+  const isWorldcup = state.gameMode === ROOM_MODE_WORLDCUP;
+  els.sourceUrlLabel.textContent = isWorldcup ? "PIKU 월드컵 링크" : "TierMaker 링크";
+  els.tierUrlInput.placeholder = isWorldcup
+    ? "https://www.piku.co.kr/w/..."
+    : "https://tiermaker.com/create/...";
+  els.templateSearchInput.placeholder = isWorldcup
+    ? "아이돌, 음식, 애니..."
+    : "pokemon, animals, kpop...";
+  setTemplateSearchStatus(
+    isWorldcup
+      ? "PIKU 이상형월드컵을 검색하고 결과에서 바로 방을 열 수 있습니다."
+      : "TierMaker 템플릿 이름을 검색하고 결과에서 바로 방을 열 수 있습니다."
+  );
+  setImportStatus(
+    isWorldcup
+      ? "PIKU 링크는 공개 랭킹 후보를 가져와 선택한 규모로 방을 만듭니다."
+      : "검색 결과에 없는 템플릿만 링크로 직접 열어주세요."
+  );
 }
 
 function setImportStatus(message, isError = false) {
   els.importStatus.textContent = message;
   els.importStatus.style.color = isError ? "var(--danger)" : "var(--fg-muted)";
+}
+
+function saveHostToken(roomId, hostToken) {
+  if (!roomId || !hostToken) return;
+  localStorage.setItem(`${HOST_TOKEN_KEY_PREFIX}${roomId}`, hostToken);
+}
+
+function getHostToken(roomId) {
+  return roomId ? localStorage.getItem(`${HOST_TOKEN_KEY_PREFIX}${roomId}`) || "" : "";
+}
+
+function hasHostToken(roomId) {
+  return Boolean(getHostToken(roomId));
+}
+
+function isCurrentPlayerHost() {
+  return Boolean(state.currentRoom?.players?.some((player) => player.id === socket.id && player.isHost));
+}
+
+function readStoredBoardZoom() {
+  const stored = Number(localStorage.getItem("mtm:boardZoom"));
+  if (Number.isFinite(stored)) {
+    return clampBoardZoom(stored);
+  }
+  return 1;
+}
+
+function changeBoardZoom(delta) {
+  setBoardZoom(state.boardZoom + delta);
+}
+
+function setBoardZoom(value) {
+  state.boardZoom = clampBoardZoom(value);
+  localStorage.setItem("mtm:boardZoom", String(state.boardZoom));
+  applyBoardZoom();
+}
+
+function applyBoardZoom() {
+  els.tierBoard.style.setProperty("--board-zoom", String(state.boardZoom));
+  updateZoomControls();
+}
+
+function updateZoomControls() {
+  const hasTierRoom = Boolean(state.currentRoom && normalizeGameMode(state.currentRoom.mode) === ROOM_MODE_TIERMAKER);
+  els.zoomOutButton.disabled = !hasTierRoom || state.boardZoom <= MIN_BOARD_ZOOM;
+  els.zoomInButton.disabled = !hasTierRoom || state.boardZoom >= MAX_BOARD_ZOOM;
+  els.zoomLevelLabel.textContent = `${Math.round(state.boardZoom * 100)}%`;
+}
+
+function clampBoardZoom(value) {
+  const rounded = Math.round(Number(value) * 100) / 100;
+  if (!Number.isFinite(rounded)) return 1;
+  return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, rounded));
 }
 
 function getRoomIdFromHash() {
@@ -538,19 +923,23 @@ function renderRooms() {
 
   els.roomList.innerHTML = state.rooms
     .map(
-      (room) => `
-        <article class="room-card">
-          <div class="room-card-main">
-            <strong title="${escapeHtml(room.title)}">${escapeHtml(room.title)}</strong>
-            <div class="room-meta">${room.id} · ${room.playerCount}명 · 이미지 ${room.imageCount}</div>
-            ${renderRoomParticipants(room.players || [], "room-card-participants")}
-          </div>
-          <div class="room-card-actions">
-            <button type="button" class="button button-ghost" data-join-room="${room.id}">입장</button>
-            <button type="button" class="button button-danger" data-delete-room="${room.id}">삭제</button>
-          </div>
-        </article>
-      `
+      (room) => {
+        const canDelete = hasHostToken(room.id);
+        const displayTitle = getRoomDisplayTitle(room);
+        return `
+          <article class="room-card">
+            <div class="room-card-main">
+              <strong title="${escapeHtml(displayTitle)}">${escapeHtml(displayTitle)}</strong>
+              <div class="room-meta">${room.id} · ${escapeHtml(getModeLabel(room.mode))} · ${room.playerCount}명 · ${escapeHtml(getRoomItemMeta(room))}</div>
+              ${renderRoomParticipants(room.players || [], "room-card-participants")}
+            </div>
+            <div class="room-card-actions">
+              <button type="button" class="button button-ghost" data-join-room="${room.id}">입장</button>
+              <button type="button" class="button button-danger" data-delete-room="${room.id}"${canDelete ? "" : " disabled"}>삭제</button>
+            </div>
+          </article>
+        `;
+      }
     )
     .join("");
 
@@ -562,23 +951,41 @@ function renderRooms() {
   });
 }
 
+function getRoomItemMeta(room) {
+  return normalizeGameMode(room?.mode) === ROOM_MODE_WORLDCUP
+    ? `${Number(room?.bracketSize || room?.imageCount || 0)}강 · 후보 ${Number(room?.imageCount || 0)}`
+    : `이미지 ${Number(room?.imageCount || 0)}`;
+}
+
 function renderWorkspace() {
   const room = state.currentRoom;
   const roomIdFromHash = getRoomIdFromHash();
   const pendingRoomId = state.pendingRoomId || roomIdFromHash;
   const hasRoom = Boolean(room);
+  const isTierRoom = hasRoom && normalizeGameMode(room.mode) === ROOM_MODE_TIERMAKER;
+  const isWorldcupRoom = hasRoom && normalizeGameMode(room.mode) === ROOM_MODE_WORLDCUP;
   applyScreenMode();
+  document.body.classList.toggle("has-current-room", hasRoom);
+  document.body.classList.toggle("worldcup-room", isWorldcupRoom);
   els.emptyState.hidden = hasRoom;
   els.boardWrap.hidden = !hasRoom;
   els.playerList.hidden = !hasRoom;
-  els.addImageButton.disabled = !hasRoom;
-  els.addTierButton.disabled = !hasRoom;
-  els.saveImageButton.disabled = !hasRoom;
+  const isHost = hasRoom && isCurrentPlayerHost();
+  const hideTierTools = hasRoom && !isTierRoom;
+  els.zoomControl.hidden = hideTierTools;
+  els.addImageButton.hidden = hideTierTools;
+  els.addTierButton.hidden = hideTierTools;
+  els.saveImageButton.hidden = hideTierTools;
+  els.addImageButton.disabled = !isTierRoom;
+  els.addTierButton.disabled = !isTierRoom || !isHost;
+  els.saveImageButton.disabled = !isTierRoom;
   els.copyRoomButton.disabled = !hasRoom;
-  els.resetRoomButton.disabled = !hasRoom;
-  els.deleteRoomButton.disabled = !hasRoom;
+  els.resetRoomButton.disabled = !isHost;
+  els.deleteRoomButton.disabled = !isHost;
+  updateZoomControls();
 
   if (!room) {
+    state.selectedItemId = null;
     els.roomCodeLabel.textContent = pendingRoomId ? `ROOM ${pendingRoomId}` : "NO ROOM";
     els.workspaceTitle.textContent = pendingRoomId
       ? "닉네임을 저장하면 바로 입장합니다"
@@ -589,18 +996,33 @@ function renderWorkspace() {
           ? "초대 링크로 들어왔습니다. 상단에서 닉네임을 입력하고 저장하면 이 방으로 바로 입장합니다."
         : "왼쪽에서 닉네임을 정하고, 템플릿을 검색해 고르거나 열린 방에 들어가 같이 정렬을 시작하세요.";
     els.tierBoard.innerHTML = "";
+    els.worldcupBoard.innerHTML = "";
+    els.tierBoard.hidden = false;
+    els.worldcupBoard.hidden = true;
     els.playerList.innerHTML = "";
     renderPlayers();
     return;
   }
 
   els.roomCodeLabel.textContent = `ROOM ${room.id}`;
-  els.workspaceTitle.textContent = room.title;
-  renderBoard(room);
+  els.workspaceTitle.textContent = getRoomDisplayTitle(room);
+  if (state.selectedItemId && !room.items.some((item) => item.id === state.selectedItemId)) {
+    state.selectedItemId = null;
+  }
+  els.tierBoard.hidden = !isTierRoom;
+  els.worldcupBoard.hidden = !isWorldcupRoom;
+  if (isTierRoom) {
+    renderBoard(room);
+    els.worldcupBoard.innerHTML = "";
+  } else {
+    els.tierBoard.innerHTML = "";
+    renderWorldcup(room);
+  }
   renderPlayers();
 }
 
 function renderBoard(room) {
+  const canEditTiers = isCurrentPlayerHost();
   const lanes = [
     { id: "pool", label: "대기 이미지", color: "var(--bg-elevated)", kind: "pool" },
     ...room.tiers.map((tier) => ({ ...tier, kind: "tier" })),
@@ -612,13 +1034,14 @@ function renderBoard(room) {
         .filter((item) => item.laneId === lane.id)
         .sort((a, b) => a.order - b.order);
       const tierDragAttrs =
-        lane.kind === "tier"
+        lane.kind === "tier" && canEditTiers
           ? ` draggable="true" data-tier-drag-handle data-tier-id="${escapeHtml(lane.id)}" aria-label="${escapeHtml(lane.label)} 순서 이동"`
           : "";
-      const tierHandleIcon = lane.kind === "tier" ? `<span class="tier-drag-icon" aria-hidden="true">↕</span>` : "";
+      const tierHandleIcon =
+        lane.kind === "tier" && canEditTiers ? `<span class="tier-drag-icon" aria-hidden="true">↕</span>` : "";
       return `
         <section class="${lane.kind === "pool" ? "pool-row" : "tier-row"}" data-lane-id="${lane.id}">
-          <div class="tier-label-cell" style="--tier-color: ${lane.color}"${tierDragAttrs}>
+          <div class="tier-label-cell" data-lane-target="${lane.id}" style="--tier-color: ${lane.color}"${tierDragAttrs}>
             ${tierHandleIcon}
             <strong>${escapeHtml(lane.label)}</strong>
           </div>
@@ -632,8 +1055,141 @@ function renderBoard(room) {
 
   els.tierBoard.querySelectorAll(".tier-item").forEach(bindItemEvents);
   els.tierBoard.querySelectorAll(".drop-zone").forEach(bindDropZoneEvents);
+  els.tierBoard.querySelectorAll("[data-lane-target]").forEach(bindLaneTargetEvents);
   els.tierBoard.querySelectorAll("[data-tier-drag-handle]").forEach(bindTierDragEvents);
   bindTierBoardReorderEvents();
+  renderMoveSelection();
+}
+
+function renderWorldcup(room) {
+  const worldcup = room.worldcup || {};
+  const champion = worldcup.championId ? room.items.find((item) => item.id === worldcup.championId) : null;
+  const pairItems = (worldcup.currentPair || [])
+    .map((itemId) => room.items.find((item) => item.id === itemId))
+    .filter(Boolean);
+
+  if (worldcup.completed && champion) {
+    els.worldcupBoard.innerHTML = `
+      <section class="worldcup-stage is-complete">
+        <div class="worldcup-header">
+          <span class="coordinate">WINNER</span>
+          <h3>${escapeHtml(getItemDisplayName(champion))}</h3>
+          <p>이상형월드컵이 끝났습니다. 방장이 초기화하면 같은 후보로 다시 시작합니다.</p>
+        </div>
+        <button type="button" class="worldcup-winner" data-preview-worldcup-item="${escapeHtml(champion.id)}">
+          <img src="${getItemImageSrc(champion)}" alt="${escapeHtml(getItemDisplayName(champion))}" loading="lazy" decoding="async"${getItemFallbackImageSrc(champion) ? ` data-fallback-src="${escapeHtml(getItemFallbackImageSrc(champion))}" referrerpolicy="no-referrer"` : ""} />
+          <span>${escapeHtml(getItemDisplayName(champion))}</span>
+        </button>
+      </section>
+    `;
+    bindWorldcupImages();
+    return;
+  }
+
+  if (pairItems.length < 2) {
+    els.worldcupBoard.innerHTML = `
+      <section class="worldcup-stage">
+        <div class="worldcup-header">
+          <span class="coordinate">WAIT</span>
+          <h3>대결 준비 중</h3>
+          <p>후보를 충분히 가져오지 못했거나 다음 대결을 준비하고 있습니다.</p>
+        </div>
+      </section>
+    `;
+    return;
+  }
+
+  const totalVotes = (worldcup.votes || []).length;
+  const playerCount = Number(worldcup.playerCount || room.players?.length || 1);
+  const myVote = (worldcup.votes || []).find((vote) => vote.playerId === socket.id)?.itemId || "";
+  const isTieBreaking = Boolean(worldcup.tieBreak);
+  const bracketLabel = Number(worldcup.bracketSize || room.bracketSize || room.imageCount || 0);
+
+  els.worldcupBoard.innerHTML = `
+    <section class="worldcup-stage${isTieBreaking ? " is-resolving" : ""}">
+      <div class="worldcup-header">
+        <span class="coordinate">${bracketLabel ? `${bracketLabel}강 · ` : ""}ROUND ${Number(worldcup.round || 1)} · MATCH ${Number(worldcup.match || 1)}</span>
+        <h3>${isTieBreaking ? "동률입니다. 랜덤 판정 중" : "더 마음에 드는 쪽을 선택하세요"}</h3>
+        <p>${isTieBreaking ? "모든 참가자에게 같은 결과가 적용됩니다." : `${totalVotes}/${playerCount}명 선택 · 과반이면 다음 대결로 넘어갑니다.`}</p>
+      </div>
+      <div class="worldcup-match">
+        ${pairItems.map((item) => renderWorldcupChoice(item, worldcup, myVote, isTieBreaking)).join("")}
+      </div>
+      ${isTieBreaking ? renderWorldcupTieBreak(room, worldcup) : ""}
+      <div class="worldcup-progress">
+        <span>이번 라운드 남은 후보 ${Number(worldcup.remainingInRound || 0)}개</span>
+        <span>다음 라운드 진출 ${Number(worldcup.nextRoundCount || 0)}개</span>
+      </div>
+    </section>
+  `;
+
+  els.worldcupBoard.querySelectorAll("[data-worldcup-vote]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await voteWorldcup(button.dataset.worldcupVote);
+    });
+  });
+  bindWorldcupImages();
+}
+
+function renderWorldcupChoice(item, worldcup, myVote, isTieBreaking = false) {
+  const displayName = getItemDisplayName(item);
+  const voteCount = Number(worldcup.voteCounts?.[item.id] || 0);
+  const voted = myVote === item.id;
+  const selectedByRandom = worldcup.tieBreak?.winnerId === item.id;
+  return `
+    <article class="worldcup-choice${voted ? " is-voted" : ""}${selectedByRandom ? " is-random-target" : ""}">
+      <button type="button" class="worldcup-image-button" data-preview-worldcup-item="${escapeHtml(item.id)}" aria-label="${escapeHtml(displayName)} 확대">
+        <img src="${getItemImageSrc(item)}" alt="${escapeHtml(displayName)}" loading="lazy" decoding="async"${getItemFallbackImageSrc(item) ? ` data-fallback-src="${escapeHtml(getItemFallbackImageSrc(item))}" referrerpolicy="no-referrer"` : ""} />
+      </button>
+      <div class="worldcup-choice-body">
+        <strong title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</strong>
+        <span class="room-meta">${voteCount}표${voted ? " · 내 선택" : ""}</span>
+        <button type="button" class="button button-accent wide-button" data-worldcup-vote="${escapeHtml(item.id)}"${isTieBreaking ? " disabled" : ""}>
+          선택
+        </button>
+      </div>
+    </article>
+  `;
+}
+
+function renderWorldcupTieBreak(room, worldcup) {
+  const winner = room.items.find((item) => item.id === worldcup.tieBreak?.winnerId);
+  const winnerName = winner ? getItemDisplayName(winner) : "선택된 후보";
+  return `
+    <aside class="worldcup-randomizer" aria-live="polite">
+      <div class="coin-flip" aria-hidden="true">
+        <span class="coin-face">?</span>
+        <span class="coin-face coin-face-back">MTM</span>
+      </div>
+      <div class="worldcup-random-copy">
+        <strong>동률 판정</strong>
+        <span>동전던지기로 다음 라운드 진출자를 정하고 있습니다.</span>
+        <span class="worldcup-random-result">결과: ${escapeHtml(winnerName)}</span>
+      </div>
+    </aside>
+  `;
+}
+
+function bindWorldcupImages() {
+  els.worldcupBoard.querySelectorAll("img").forEach((image) => {
+    image.addEventListener("error", () => fallbackItemImage(image), { once: true });
+  });
+  els.worldcupBoard.querySelectorAll("[data-preview-worldcup-item]").forEach((button) => {
+    button.addEventListener("dblclick", () => openImagePreview(button.dataset.previewWorldcupItem));
+  });
+}
+
+async function voteWorldcup(itemId) {
+  if (!state.currentRoom || !itemId) return;
+  els.copyStatus.textContent = "선택 중";
+  try {
+    const response = await emitWithAck("worldcup:vote", { itemId });
+    if (!response.ok) throw new Error(response.message || "선택에 실패했습니다.");
+    els.copyStatus.textContent = response.tieBreak ? "동률 판정 중" : response.advanced ? "다음 대결" : "선택 완료";
+  } catch (error) {
+    els.copyStatus.textContent = "선택 실패";
+    setImportStatus(error.message, true);
+  }
 }
 
 function renderItem(item) {
@@ -641,12 +1197,14 @@ function renderItem(item) {
   const fallbackSrc = getItemFallbackImageSrc(item);
   const displayName = getItemDisplayName(item);
   const active = getItemActiveFocus(item.id);
+  const lockedByOther = isItemLockedByOther(item.id);
+  const selectedForMove = state.selectedItemId === item.id;
   const activeStyle = active ? ` style="--active-color:${escapeHtml(active.color)}"` : "";
   const activeBadge = active
     ? `<span class="active-owner" title="${escapeHtml(active.nickname)}">${escapeHtml(active.nickname)}</span>`
     : "";
   return `
-    <div class="tier-item${active ? " is-active" : ""}" draggable="true" data-item-id="${item.id}" aria-label="${escapeHtml(displayName)}"${activeStyle}>
+    <div class="tier-item${active ? " is-active" : ""}${lockedByOther ? " is-locked-by-other" : ""}${selectedForMove ? " is-move-selected" : ""}" draggable="true" data-item-id="${item.id}" aria-label="${escapeHtml(displayName)}"${activeStyle}>
       <img src="${imageSrc}" alt="${escapeHtml(displayName)}" loading="lazy" decoding="async"${fallbackSrc ? ` data-fallback-src="${escapeHtml(fallbackSrc)}" referrerpolicy="no-referrer"` : ""} />
       ${activeBadge}
     </div>
@@ -654,13 +1212,20 @@ function renderItem(item) {
 }
 
 function getItemImageSrc(item) {
-  return item.src.startsWith("data:")
-    ? item.src
-    : `/api/image?url=${encodeURIComponent(item.src)}`;
+  const src = String(item?.src || "");
+  if (src.startsWith("data:")) return src;
+  if (src) return `/api/image?url=${encodeURIComponent(src)}`;
+  return item?.placeholderSrc || "";
 }
 
 function getItemFallbackImageSrc(item) {
-  return item.src.startsWith("data:") ? "" : item.src;
+  const src = String(item?.src || "");
+  if (item?.placeholderSrc) return item.placeholderSrc;
+  return src.startsWith("data:") ? "" : src;
+}
+
+function isPikuOriginalImageUrl(src) {
+  return /^https?:\/\/img\.piku\.co\.kr\/w\/uploads\//i.test(src);
 }
 
 function bindItemEvents(item) {
@@ -668,13 +1233,23 @@ function bindItemEvents(item) {
   image?.addEventListener("error", () => fallbackItemImage(image), { once: true });
   item.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+    if (notifyIfItemLocked(item.dataset.itemId)) return;
     setActiveItem(item.dataset.itemId);
+  });
+  item.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (event.detail > 1) return;
+    await handleItemTapMove(item);
   });
   item.addEventListener("dblclick", () => {
     openImagePreview(item.dataset.itemId);
   });
   item.addEventListener("dragstart", (event) => {
     event.stopPropagation();
+    if (notifyIfItemLocked(item.dataset.itemId)) {
+      event.preventDefault();
+      return;
+    }
     state.draggedItemId = item.dataset.itemId;
     setActiveItem(item.dataset.itemId);
     item.classList.add("is-dragging");
@@ -685,6 +1260,22 @@ function bindItemEvents(item) {
     state.draggedItemId = null;
     item.classList.remove("is-dragging");
   });
+}
+
+async function handleItemTapMove(item) {
+  const itemId = item.dataset.itemId;
+  if (!itemId) return;
+
+  if (state.selectedItemId && state.selectedItemId !== itemId) {
+    const zone = item.closest(".drop-zone");
+    if (zone) {
+      await moveSelectedItem(zone.dataset.dropZone, itemId);
+    }
+    return;
+  }
+
+  if (notifyIfItemLocked(itemId)) return;
+  selectItemForMove(itemId);
 }
 
 function fallbackItemImage(image) {
@@ -702,18 +1293,30 @@ function bindDropZoneEvents(zone) {
   zone.addEventListener("dragleave", () => {
     zone.classList.remove("is-over");
   });
-  zone.addEventListener("drop", (event) => {
+  zone.addEventListener("drop", async (event) => {
     if (state.draggedTierId) return;
     event.preventDefault();
     zone.classList.remove("is-over");
     const itemId = event.dataTransfer.getData("text/plain") || state.draggedItemId;
     if (!itemId) return;
+    if (notifyIfItemLocked(itemId)) return;
     const beforeElement = getBeforeElement(zone, event.clientX, event.clientY);
-    socket.emit("item:move", {
-      itemId,
-      laneId: zone.dataset.dropZone,
-      beforeId: beforeElement?.dataset.itemId || null,
-    });
+    await moveItemWithAck(itemId, zone.dataset.dropZone, beforeElement?.dataset.itemId || null);
+  });
+  zone.addEventListener("click", async (event) => {
+    if (event.target.closest(".tier-item")) return;
+    if (await moveSelectedItem(zone.dataset.dropZone, null)) {
+      event.stopPropagation();
+    }
+  });
+}
+
+function bindLaneTargetEvents(target) {
+  target.addEventListener("click", async (event) => {
+    if (state.draggedTierId) return;
+    if (await moveSelectedItem(target.dataset.laneTarget, null)) {
+      event.stopPropagation();
+    }
   });
 }
 
@@ -798,9 +1401,59 @@ function getBeforeElement(zone, x, y) {
   ).element;
 }
 
+function selectItemForMove(itemId) {
+  if (!state.currentRoom || !itemId) return;
+  state.selectedItemId = itemId;
+  renderMoveSelection();
+  els.copyStatus.textContent = "위치 선택";
+}
+
+async function moveSelectedItem(laneId, beforeId) {
+  const itemId = state.selectedItemId;
+  if (!state.currentRoom || !itemId || !laneId || itemId === beforeId) return false;
+  if (notifyIfItemLocked(itemId)) {
+    clearSelectedItem();
+    return false;
+  }
+
+  const moved = await moveItemWithAck(itemId, laneId, beforeId || null);
+  if (moved) {
+    clearSelectedItem();
+    clearActiveItem();
+  }
+  return moved;
+}
+
+async function moveItemWithAck(itemId, laneId, beforeId) {
+  els.copyStatus.textContent = "이동 중";
+  try {
+    const response = await emitWithAck("item:move", { itemId, laneId, beforeId });
+    if (!response.ok) throw new Error(response.message || "이미지를 이동할 수 없습니다.");
+    els.copyStatus.textContent = "이미지 이동됨";
+    return true;
+  } catch (error) {
+    els.copyStatus.textContent = "이동 실패";
+    setImportStatus(error.message, true);
+    return false;
+  }
+}
+
+function clearSelectedItem() {
+  if (!state.selectedItemId) return;
+  state.selectedItemId = null;
+  renderMoveSelection();
+}
+
+function renderMoveSelection() {
+  els.tierBoard.classList.toggle("has-move-selection", Boolean(state.selectedItemId));
+  els.tierBoard.querySelectorAll(".tier-item").forEach((tile) => {
+    tile.classList.toggle("is-move-selected", tile.dataset.itemId === state.selectedItemId);
+  });
+}
+
 function mapActiveItems(activeItems) {
   return activeItems.reduce((acc, active) => {
-    if (active.playerId && active.itemId) {
+    if (active.playerId && active.itemId && !isActiveItemExpired(active)) {
       acc[active.playerId] = active;
     }
     return acc;
@@ -808,11 +1461,43 @@ function mapActiveItems(activeItems) {
 }
 
 function getItemActiveFocus(itemId) {
-  return Object.values(state.activeItems).find((active) => active.itemId === itemId) || null;
+  return Object.values(state.activeItems).find((active) => active.itemId === itemId && !isActiveItemExpired(active)) || null;
+}
+
+function getItemLockOwner(itemId) {
+  return (
+    Object.values(state.activeItems).find(
+      (active) => active.itemId === itemId && active.playerId !== socket.id && !isActiveItemExpired(active)
+    ) || null
+  );
+}
+
+function isActiveItemExpired(active) {
+  const lockedAt = Number(active?.lockedAt || 0);
+  return !lockedAt || Date.now() - lockedAt > ITEM_LOCK_TTL_MS;
+}
+
+function pruneLocalActiveItems() {
+  if (!Object.values(state.activeItems).some(isActiveItemExpired)) return;
+  state.activeItems = mapActiveItems(Object.values(state.activeItems));
+  renderItemHighlights();
+}
+
+function isItemLockedByOther(itemId) {
+  return Boolean(getItemLockOwner(itemId));
+}
+
+function notifyIfItemLocked(itemId) {
+  const lockOwner = getItemLockOwner(itemId);
+  if (!lockOwner) return false;
+  els.copyStatus.textContent = "사용 중";
+  setImportStatus(`${lockOwner.nickname || "다른 참가자"}님이 잡고 있는 이미지는 이동할 수 없습니다.`, true);
+  return true;
 }
 
 function setActiveItem(itemId) {
   if (!state.currentRoom || !itemId) return;
+  if (notifyIfItemLocked(itemId)) return;
   const player = state.currentRoom.players.find((entry) => entry.id === socket.id);
   if (player) {
     state.activeItems[socket.id] = {
@@ -820,6 +1505,7 @@ function setActiveItem(itemId) {
       playerId: socket.id,
       nickname: player.nickname,
       color: player.color,
+      lockedAt: Date.now(),
     };
     renderItemHighlights();
   }
@@ -838,7 +1524,9 @@ function clearActiveItem() {
 function renderItemHighlights() {
   els.tierBoard.querySelectorAll(".tier-item").forEach((tile) => {
     const active = getItemActiveFocus(tile.dataset.itemId);
+    const lockedByOther = isItemLockedByOther(tile.dataset.itemId);
     tile.classList.toggle("is-active", Boolean(active));
+    tile.classList.toggle("is-locked-by-other", lockedByOther);
     tile.style.setProperty("--active-color", active?.color || "transparent");
     tile.querySelector(".active-owner")?.remove();
     if (active) {
@@ -946,6 +1634,8 @@ function openImagePreview(itemId) {
   const displayName = getItemDisplayName(item);
   els.lightboxImage.src = getItemImageSrc(item);
   els.lightboxImage.alt = displayName;
+  els.lightboxImage.dataset.fallbackSrc = getItemFallbackImageSrc(item);
+  els.lightboxImage.onerror = () => fallbackItemImage(els.lightboxImage);
   els.lightboxTitle.textContent = displayName;
   els.imageLightbox.hidden = false;
   els.closeLightboxButton.focus();
@@ -963,6 +1653,8 @@ function getItemDisplayName(item) {
 function closeImagePreview() {
   els.imageLightbox.hidden = true;
   els.lightboxImage.removeAttribute("src");
+  els.lightboxImage.removeAttribute("data-fallback-src");
+  els.lightboxImage.onerror = null;
 }
 
 async function handleImageUpload(event) {
@@ -1267,19 +1959,23 @@ function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
 
 async function copyRoomLink() {
   if (!state.currentRoom) return;
-  await loadConfig();
-  const baseUrl = getShareBaseUrl();
+  els.copyStatus.textContent = "주소 확인 중";
+  const baseUrl = await waitForShareBaseUrl();
+  if (!baseUrl) {
+    els.copyStatus.textContent = "터널 준비 중";
+    setImportStatus(
+      "Cloudflare Tunnel 주소가 아직 준비 중입니다. EXE 창에 Public URL이 표시되면 다시 눌러주세요.",
+      true
+    );
+    return;
+  }
+
   const link = `${baseUrl}/#room=${state.currentRoom.id}`;
-  const isLocalLink = ["localhost", "127.0.0.1"].includes(new URL(baseUrl).hostname);
 
   try {
     await writeClipboard(link);
-    els.copyStatus.textContent = isLocalLink ? "로컬 링크 복사됨" : "초대 링크 복사됨";
-    setImportStatus(
-      isLocalLink
-        ? `로컬 초대 링크를 복사했습니다: ${link}`
-        : `초대 링크를 클립보드에 복사했습니다: ${link}`
-    );
+    els.copyStatus.textContent = "초대 링크 복사됨";
+    setImportStatus(`초대 링크를 클립보드에 복사했습니다: ${link}`);
   } catch (_error) {
     els.copyStatus.textContent = "복사 실패";
     setImportStatus(`복사가 막혔습니다. 이 링크를 직접 복사해주세요: ${link}`, true);
@@ -1292,6 +1988,9 @@ async function deleteRoom(roomId) {
   try {
     const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`, {
       method: "DELETE",
+      headers: {
+        "x-host-token": getHostToken(roomId),
+      },
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.message || "방 삭제에 실패했습니다.");
@@ -1307,17 +2006,87 @@ async function deleteRoom(roomId) {
   }
 }
 
+async function resetRoom() {
+  if (!state.currentRoom) return;
+  try {
+    const response = await emitWithAck("room:reset", {});
+    if (!response.ok) throw new Error(response.message || "초기화에 실패했습니다.");
+    setImportStatus("방을 초기화했습니다.");
+  } catch (error) {
+    setImportStatus(error.message, true);
+  }
+}
+
 function getShareBaseUrl() {
-  return state.publicBaseUrl || window.location.origin;
+  if (state.publicBaseUrl && !isLocalUrl(state.publicBaseUrl)) {
+    return state.publicBaseUrl;
+  }
+
+  if (!isLocalUrl(window.location.origin)) {
+    return window.location.origin;
+  }
+
+  return "";
+}
+
+async function waitForShareBaseUrl() {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await loadConfig();
+    const baseUrl = getShareBaseUrl();
+    if (baseUrl) return baseUrl;
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+  }
+
+  return "";
+}
+
+function isLocalUrl(value) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return isLocalHostname(hostname) || isPrivateIpv4(hostname);
+  } catch (_error) {
+    return true;
+  }
+}
+
+function isLocalHostname(hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "0.0.0.0" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".local")
+  );
+}
+
+function isPrivateIpv4(hostname) {
+  const parts = hostname.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
 }
 
 async function writeClipboard(text) {
-  if (copyWithSelection(text)) {
-    return;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (_error) {
+      // Fall through to the selection-based copy path for browsers that gate clipboard permission.
+    }
   }
 
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
+  if (copyWithSelection(text)) {
     return;
   }
 

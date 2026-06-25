@@ -25,7 +25,7 @@
       </div>
       <form class="profile-strip" id="profileForm">
         <label for="nicknameInput">닉네임</label>
-        <input id="nicknameInput" name="nickname" maxlength="18" autocomplete="nickname" />
+        <input id="nicknameInput" name="nickname" maxlength="18" autocomplete="nickname" placeholder="닉네임" />
         <button type="submit" class="button button-accent">저장</button>
         <span class="status-pill" id="connectionStatus" aria-live="polite">연결 중</span>
       </form>
@@ -38,6 +38,13 @@
             <span class="coordinate">FIND</span>
             <h2 id="discoverTitle">템플릿 찾기</h2>
           </div>
+          <fieldset class="mode-switch" id="gameModeGroup">
+            <legend>게임 종류</legend>
+            <input type="radio" id="modeTierMaker" name="gameMode" value="tiermaker" checked />
+            <label for="modeTierMaker">티어메이커</label>
+            <input type="radio" id="modeWorldcup" name="gameMode" value="worldcup" />
+            <label for="modeWorldcup">이상형월드컵</label>
+          </fieldset>
           <form class="stack-form" id="templateSearchForm">
             <label for="templateSearchInput">찾을 주제</label>
             <input
@@ -61,7 +68,7 @@
             <h2 id="createTitle">직접 가져오기</h2>
           </div>
           <form class="stack-form" id="createRoomForm">
-            <label for="tierUrlInput">TierMaker 링크</label>
+            <label for="tierUrlInput" id="sourceUrlLabel">TierMaker 링크</label>
             <textarea
               id="tierUrlInput"
               rows="3"
@@ -98,6 +105,11 @@
           </div>
           <div class="toolbar-actions">
             <span class="copy-status" id="copyStatus" aria-live="polite"></span>
+            <div class="zoom-control" aria-label="보드 확대/축소">
+              <button type="button" class="icon-button zoom-button" id="zoomOutButton" aria-label="보드 축소" disabled>−</button>
+              <span class="zoom-level" id="zoomLevelLabel" aria-live="polite">100%</span>
+              <button type="button" class="icon-button zoom-button" id="zoomInButton" aria-label="보드 확대" disabled>+</button>
+            </div>
             <button type="button" class="button button-ghost" id="addImageButton" disabled>이미지 추가</button>
             <button type="button" class="button button-ghost" id="addTierButton" disabled>티어 추가</button>
             <button type="button" class="button button-ghost" id="saveImageButton" disabled>저장하기</button>
@@ -121,11 +133,27 @@
 
         <div class="board-wrap" id="boardWrap" hidden>
           <div class="tier-board" id="tierBoard" aria-label="티어 보드"></div>
+          <div class="worldcup-board" id="worldcupBoard" aria-label="이상형월드컵 보드" hidden></div>
         </div>
       </section>
     </main>
 
     <div class="cursor-layer" id="cursorLayer" aria-hidden="true"></div>
+
+    <div class="room-create-progress" id="roomCreateProgress" hidden>
+      <section class="room-create-progress-panel" role="dialog" aria-modal="true" aria-labelledby="roomCreateProgressTitle">
+        <span class="coordinate">IMPORTING</span>
+        <h2 id="roomCreateProgressTitle">방 생성 중</h2>
+        <p id="roomCreateProgressText">템플릿을 가져오는 중입니다.</p>
+        <div class="room-create-progress-track" aria-label="방 생성 진행률">
+          <div class="room-create-progress-bar" id="roomCreateProgressBar"></div>
+        </div>
+        <div class="room-create-progress-meta">
+          <span id="roomCreateProgressPercent">0%</span>
+          <span id="roomCreateProgressElapsed">0초</span>
+        </div>
+      </section>
+    </div>
 
     <div class="image-lightbox" id="imageLightbox" hidden>
       <button type="button" class="lightbox-backdrop" id="closeLightboxBackdrop" aria-label="확대 이미지 닫기"></button>

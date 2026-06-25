@@ -60,7 +60,10 @@ async function testTemplate(url) {
   }
 
   if (!data.existing) {
-    await fetch(`${baseUrl}/api/rooms/${data.room.id}`, { method: "DELETE" }).catch(() => {});
+    await fetch(`${baseUrl}/api/rooms/${data.room.id}`, {
+      method: "DELETE",
+      headers: data.hostToken ? { "x-host-token": data.hostToken } : {},
+    }).catch(() => {});
   }
 
   const checked = imageChecks.length;
