@@ -7,7 +7,7 @@ TierMaker `create/...` 페이지 오른쪽에 플로팅 메뉴를 띄워 현재 
 1. Chrome 또는 Edge에서 `chrome://extensions`를 엽니다.
 2. `개발자 모드`를 켭니다.
 3. `압축해제된 확장 프로그램을 로드`를 누릅니다.
-4. 이 폴더를 선택합니다: `E:\MULTITIERMAKER\extension`
+4. 이 저장소의 `extension` 폴더를 선택합니다.
 
 ## 사용
 
