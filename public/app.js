@@ -30,6 +30,8 @@ const state = {
   roomCreateStartedAt: 0,
   roomCreateTimer: null,
   roomCreateHideTimer: null,
+  roomStatusHideTimer: null,
+  pendingConfirmAction: null,
 };
 
 const els = {
@@ -37,6 +39,8 @@ const els = {
   nicknameInput: document.querySelector("#nicknameInput"),
   profileForm: document.querySelector("#profileForm"),
   connectionStatus: document.querySelector("#connectionStatus"),
+  createTabButtons: document.querySelectorAll("[data-create-tab]"),
+  createTabPanels: document.querySelectorAll(".create-tab-panel"),
   createRoomForm: document.querySelector("#createRoomForm"),
   gameModeInputs: document.querySelectorAll('input[name="gameMode"]'),
   sourceUrlLabel: document.querySelector("#sourceUrlLabel"),
@@ -52,7 +56,11 @@ const els = {
   playerList: document.querySelector("#playerList"),
   roomCodeLabel: document.querySelector("#roomCodeLabel"),
   workspaceTitle: document.querySelector("#workspaceTitle"),
+  toolbarActions: document.querySelector("#toolbarActions"),
   copyStatus: document.querySelector("#copyStatus"),
+  roomStatusToast: document.querySelector("#roomStatusToast"),
+  roomStatusText: document.querySelector("#roomStatusText"),
+  closeRoomStatusButton: document.querySelector("#closeRoomStatusButton"),
   addImageButton: document.querySelector("#addImageButton"),
   addTierButton: document.querySelector("#addTierButton"),
   zoomControl: document.querySelector(".zoom-control"),
@@ -81,6 +89,13 @@ const els = {
   tierDialogStatus: document.querySelector("#tierDialogStatus"),
   cancelTierDialogButton: document.querySelector("#cancelTierDialogButton"),
   closeTierDialogBackdrop: document.querySelector("#closeTierDialogBackdrop"),
+  confirmDialog: document.querySelector("#confirmDialog"),
+  confirmDialogTitle: document.querySelector("#confirmDialogTitle"),
+  confirmDialogMessage: document.querySelector("#confirmDialogMessage"),
+  closeConfirmDialogButton: document.querySelector("#closeConfirmDialogButton"),
+  closeConfirmDialogBackdrop: document.querySelector("#closeConfirmDialogBackdrop"),
+  cancelConfirmDialogButton: document.querySelector("#cancelConfirmDialogButton"),
+  acceptConfirmDialogButton: document.querySelector("#acceptConfirmDialogButton"),
   roomCreateProgress: document.querySelector("#roomCreateProgress"),
   roomCreateProgressTitle: document.querySelector("#roomCreateProgressTitle"),
   roomCreateProgressText: document.querySelector("#roomCreateProgressText"),
@@ -89,10 +104,31 @@ const els = {
   roomCreateProgressElapsed: document.querySelector("#roomCreateProgressElapsed"),
 };
 
+function icon(name) {
+  return `<i data-lucide="${escapeHtml(name)}" aria-hidden="true"></i>`;
+}
+
+function buttonContent(iconName, label) {
+  return `${icon(iconName)}${escapeHtml(label)}`;
+}
+
+function hydrateIcons() {
+  if (!window.lucide?.createIcons) return;
+  window.lucide.createIcons({
+    attrs: {
+      "aria-hidden": "true",
+      focusable: "false",
+      "stroke-width": "2.25",
+    },
+  });
+}
+
 els.nicknameInput.value = state.nickname;
 setProfileEnabled();
 applyBoardZoom();
 applyGameModeUI();
+setCreateTab("search");
+hydrateIcons();
 loadConfig();
 loadRooms();
 handleTemplateImportFromQuery();
@@ -191,6 +227,19 @@ els.templateSearchForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await searchTemplates(els.templateSearchInput.value);
 });
+els.createTabButtons.forEach((button) => {
+  button.addEventListener("click", () => setCreateTab(button.dataset.createTab));
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = Array.from(els.createTabButtons);
+    const currentIndex = buttons.indexOf(button);
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextButton = buttons[(currentIndex + direction + buttons.length) % buttons.length];
+    setCreateTab(nextButton.dataset.createTab);
+    nextButton.focus();
+  });
+});
 els.gameModeInputs.forEach((input) => {
   input.addEventListener("change", () => {
     if (!input.checked) return;
@@ -212,10 +261,11 @@ els.zoomOutButton.addEventListener("click", () => changeBoardZoom(-BOARD_ZOOM_ST
 els.zoomInButton.addEventListener("click", () => changeBoardZoom(BOARD_ZOOM_STEP));
 els.saveImageButton.addEventListener("click", saveBoardImage);
 els.copyRoomButton.addEventListener("click", copyRoomLink);
-els.resetRoomButton.addEventListener("click", resetRoom);
+els.closeRoomStatusButton.addEventListener("click", hideRoomStatus);
+els.resetRoomButton.addEventListener("click", confirmResetRoom);
 els.deleteRoomButton.addEventListener("click", () => {
   const roomId = state.currentRoom?.id;
-  if (roomId) deleteRoom(roomId);
+  if (roomId) confirmDeleteRoom(roomId);
 });
 els.closeLightboxButton.addEventListener("click", closeImagePreview);
 els.closeLightboxBackdrop.addEventListener("click", () => {
@@ -225,6 +275,10 @@ els.closeLightboxBackdrop.addEventListener("click", () => {
 els.cancelTierDialogButton.addEventListener("click", closeTierDialog);
 els.closeTierDialogBackdrop.addEventListener("click", closeTierDialog);
 els.tierDialogForm.addEventListener("submit", submitTierDialog);
+els.closeConfirmDialogButton.addEventListener("click", closeConfirmDialog);
+els.closeConfirmDialogBackdrop.addEventListener("click", closeConfirmDialog);
+els.cancelConfirmDialogButton.addEventListener("click", closeConfirmDialog);
+els.acceptConfirmDialogButton.addEventListener("click", acceptConfirmDialog);
 
 window.addEventListener("hashchange", joinRoomFromHash);
 window.addEventListener("pointermove", (event) => {
@@ -243,7 +297,8 @@ document.addEventListener("pointerdown", (event) => {
     event.target.closest(".tier-item") ||
     event.target.closest(".drop-zone") ||
     event.target.closest(".tier-label-cell") ||
-    event.target.closest(".image-lightbox")
+    event.target.closest(".image-lightbox") ||
+    event.target.closest(".confirm-dialog")
   ) {
     return;
   }
@@ -251,7 +306,9 @@ document.addEventListener("pointerdown", (event) => {
   clearActiveItem();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.imageLightbox.hidden) {
+  if (event.key === "Escape" && !els.confirmDialog.hidden) {
+    closeConfirmDialog();
+  } else if (event.key === "Escape" && !els.imageLightbox.hidden) {
     closeImagePreview();
   } else if (event.key === "Escape" && !els.tierDialog.hidden) {
     closeTierDialog();
@@ -366,7 +423,7 @@ function renderTemplateResults(templates) {
               class="button button-accent"
               data-import-template-result="${escapeHtml(template.url)}"
             >
-              ${isWorldcup ? "규모 선택" : "바로 방 만들기"}
+              ${buttonContent(isWorldcup ? "trophy" : "plus-circle", isWorldcup ? "규모 선택" : "바로 방 만들기")}
             </button>
             <button
               type="button"
@@ -374,10 +431,10 @@ function renderTemplateResults(templates) {
               data-preview-template="${escapeHtml(template.url)}"
               data-template-title="${escapeHtml(template.title)}"
             >
-              미리보기
+              ${buttonContent("eye", "미리보기")}
             </button>
             <a class="button button-ghost" href="${escapeHtml(template.url)}" target="_blank" rel="noreferrer">
-              원본 열기
+              ${buttonContent("external-link", "원본 열기")}
             </a>
           </div>
         </article>
@@ -399,12 +456,14 @@ function renderTemplateResults(templates) {
       await createRoomFromSearchResult(button.dataset.importTemplateResult);
     });
   });
+  hydrateIcons();
 }
 
 async function previewTemplate(url, fallbackTitle = "Template") {
   setTemplateSearchStatus("선택한 항목을 미리 불러오는 중입니다...");
   els.templatePreview.hidden = false;
-  els.templatePreview.innerHTML = `<div class="template-preview-loading">미리보기 로딩 중</div>`;
+  els.templatePreview.innerHTML = `<div class="template-preview-loading">${icon("loader-circle")}미리보기 로딩 중</div>`;
+  hydrateIcons();
 
   try {
     const params = new URLSearchParams({ url, mode: state.gameMode });
@@ -457,10 +516,10 @@ function renderTemplatePreview(template) {
       </div>` : ""}
       <div class="template-actions">
         <button type="button" class="button button-accent" data-import-template="${escapeHtml(template.sourceUrl)}">
-          ${isWorldcup ? "선택한 규모로 방 만들기" : "이 항목으로 방 만들기"}
+          ${buttonContent(isWorldcup ? "trophy" : "plus-circle", isWorldcup ? "선택한 규모로 방 만들기" : "이 항목으로 방 만들기")}
         </button>
         <a class="button button-ghost" href="${escapeHtml(template.sourceUrl)}" target="_blank" rel="noreferrer">
-          원본 사이트 열기
+          ${buttonContent("external-link", "원본 사이트 열기")}
         </a>
       </div>
     </article>
@@ -476,6 +535,7 @@ function renderTemplatePreview(template) {
     );
     await createRoomFromSearchResult(importButton.dataset.importTemplate, { bracketSize });
   });
+  hydrateIcons();
 }
 
 function renderWorldcupBracketPicker(template) {
@@ -531,10 +591,10 @@ function renderTemplateFallbackPreview(template) {
       <p class="template-preview-note">${escapeHtml(template.message || "미리보기 정보를 읽지 못했습니다.")}</p>
       <div class="template-actions">
         <button type="button" class="button button-accent" data-import-template="${escapeHtml(template.sourceUrl)}">
-          이 링크로 방 만들기
+          ${buttonContent("plus-circle", "이 링크로 방 만들기")}
         </button>
         <a class="button button-ghost" href="${escapeHtml(template.sourceUrl)}" target="_blank" rel="noreferrer">
-          원본 사이트 열기
+          ${buttonContent("external-link", "원본 사이트 열기")}
         </a>
       </div>
     </article>
@@ -544,6 +604,7 @@ function renderTemplateFallbackPreview(template) {
   importButton.addEventListener("click", async () => {
     await createRoomFromSearchResult(importButton.dataset.importTemplate);
   });
+  hydrateIcons();
 }
 
 function setTemplateSearchStatus(message, isError = false) {
@@ -591,6 +652,7 @@ function handleTemplateImportFromQuery() {
     applyGameModeUI();
   }
   els.tierUrlInput.value = templateUrl;
+  setCreateTab("direct");
   setTemplateSearchStatus("원본 사이트에서 선택한 링크를 받았습니다.");
 
   if (state.nickname) {
@@ -822,6 +884,19 @@ function getModeLabel(mode = state.gameMode) {
   return normalizeGameMode(mode) === ROOM_MODE_WORLDCUP ? "이상형월드컵" : "티어메이커";
 }
 
+function setCreateTab(tab) {
+  const selectedTab = tab === "direct" ? "direct" : "search";
+  els.createTabButtons.forEach((button) => {
+    const isActive = button.dataset.createTab === selectedTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+    button.setAttribute("tabindex", isActive ? "0" : "-1");
+  });
+  els.createTabPanels.forEach((panel) => {
+    panel.hidden = panel.id !== `${selectedTab}Panel`;
+  });
+}
+
 function applyGameModeUI() {
   els.gameModeInputs.forEach((input) => {
     input.checked = normalizeGameMode(input.value) === state.gameMode;
@@ -850,6 +925,36 @@ function applyGameModeUI() {
 function setImportStatus(message, isError = false) {
   els.importStatus.textContent = message;
   els.importStatus.style.color = isError ? "var(--danger)" : "var(--fg-muted)";
+  if (shouldShowRoomStatus(message)) {
+    showRoomStatus(message, isError);
+  }
+}
+
+function shouldShowRoomStatus(message) {
+  return Boolean(message && (state.currentRoom || state.pendingRoomId || getRoomIdFromHash()));
+}
+
+function showRoomStatus(message, isError = false) {
+  clearRoomStatusHideTimer();
+  els.roomStatusText.textContent = message;
+  els.roomStatusToast.hidden = false;
+  els.roomStatusToast.classList.toggle("is-error", isError);
+  if (!isError) {
+    state.roomStatusHideTimer = window.setTimeout(hideRoomStatus, 5000);
+  }
+}
+
+function hideRoomStatus() {
+  clearRoomStatusHideTimer();
+  els.roomStatusToast.hidden = true;
+  els.roomStatusText.textContent = "";
+  els.roomStatusToast.classList.remove("is-error");
+}
+
+function clearRoomStatusHideTimer() {
+  if (!state.roomStatusHideTimer) return;
+  window.clearTimeout(state.roomStatusHideTimer);
+  state.roomStatusHideTimer = null;
 }
 
 function saveHostToken(roomId, hostToken) {
@@ -917,7 +1022,8 @@ function applyScreenMode() {
 
 function renderRooms() {
   if (!state.rooms.length) {
-    els.roomList.innerHTML = `<div class="room-card room-card-empty"><strong>열린 방 없음</strong><span class="room-meta">링크로 새 방을 열어보세요</span></div>`;
+    els.roomList.innerHTML = `<div class="room-card room-card-empty"><strong>${icon("door-open")}열린 방 없음</strong><span class="room-meta">링크로 새 방을 열어보세요</span></div>`;
+    hydrateIcons();
     return;
   }
 
@@ -929,13 +1035,12 @@ function renderRooms() {
         return `
           <article class="room-card">
             <div class="room-card-main">
-              <strong title="${escapeHtml(displayTitle)}">${escapeHtml(displayTitle)}</strong>
-              <div class="room-meta">${room.id} · ${escapeHtml(getModeLabel(room.mode))} · ${room.playerCount}명 · ${escapeHtml(getRoomItemMeta(room))}</div>
-              ${renderRoomParticipants(room.players || [], "room-card-participants")}
+              <strong title="${escapeHtml(displayTitle)}">${icon(normalizeGameMode(room.mode) === ROOM_MODE_WORLDCUP ? "trophy" : "rows-3")}${escapeHtml(displayTitle)}</strong>
+              <div class="room-meta">${room.id} · ${escapeHtml(getModeLabel(room.mode))} · ${escapeHtml(getRoomItemMeta(room))}</div>
             </div>
             <div class="room-card-actions">
-              <button type="button" class="button button-ghost" data-join-room="${room.id}">입장</button>
-              ${canDelete ? `<button type="button" class="button button-danger" data-delete-room="${room.id}">삭제</button>` : ""}
+              <button type="button" class="button button-ghost" data-join-room="${room.id}">${buttonContent("log-in", "입장")}</button>
+              ${canDelete ? `<button type="button" class="button button-danger" data-delete-room="${room.id}">${buttonContent("trash-2", "삭제")}</button>` : ""}
             </div>
           </article>
         `;
@@ -947,8 +1052,9 @@ function renderRooms() {
     button.addEventListener("click", () => joinRoom(button.dataset.joinRoom));
   });
   els.roomList.querySelectorAll("[data-delete-room]").forEach((button) => {
-    button.addEventListener("click", () => deleteRoom(button.dataset.deleteRoom));
+    button.addEventListener("click", () => confirmDeleteRoom(button.dataset.deleteRoom));
   });
+  hydrateIcons();
 }
 
 function getRoomItemMeta(room) {
@@ -970,6 +1076,7 @@ function renderWorkspace() {
   els.emptyState.hidden = hasRoom;
   els.boardWrap.hidden = !hasRoom;
   els.playerList.hidden = !hasRoom;
+  els.toolbarActions.hidden = !hasRoom;
   const isHost = hasRoom && isCurrentPlayerHost();
   const hideTierTools = hasRoom && !isTierRoom;
   els.zoomControl.hidden = hideTierTools;
@@ -980,6 +1087,7 @@ function renderWorkspace() {
   els.addTierButton.disabled = !isTierRoom || !isHost;
   els.saveImageButton.disabled = !isTierRoom;
   els.copyRoomButton.disabled = !hasRoom;
+  els.resetRoomButton.hidden = !isHost;
   els.resetRoomButton.disabled = !isHost;
   els.deleteRoomButton.hidden = !isHost;
   els.deleteRoomButton.disabled = !isHost;
@@ -987,6 +1095,8 @@ function renderWorkspace() {
 
   if (!room) {
     state.selectedItemId = null;
+    hideRoomStatus();
+    els.copyStatus.textContent = "";
     els.roomCodeLabel.textContent = pendingRoomId ? `ROOM ${pendingRoomId}` : "NO ROOM";
     els.workspaceTitle.textContent = pendingRoomId
       ? "닉네임을 저장하면 바로 입장합니다"
@@ -1039,7 +1149,7 @@ function renderBoard(room) {
           ? ` draggable="true" data-tier-drag-handle data-tier-id="${escapeHtml(lane.id)}" aria-label="${escapeHtml(lane.label)} 순서 이동"`
           : "";
       const tierHandleIcon =
-        lane.kind === "tier" && canEditTiers ? `<span class="tier-drag-icon" aria-hidden="true">↕</span>` : "";
+        lane.kind === "tier" && canEditTiers ? `<span class="tier-drag-icon" aria-hidden="true">${icon("grip-vertical")}</span>` : "";
       return `
         <section class="${lane.kind === "pool" ? "pool-row" : "tier-row"}" data-lane-id="${lane.id}">
           <div class="tier-label-cell" data-lane-target="${lane.id}" style="--tier-color: ${lane.color}"${tierDragAttrs}>
@@ -1060,6 +1170,7 @@ function renderBoard(room) {
   els.tierBoard.querySelectorAll("[data-tier-drag-handle]").forEach(bindTierDragEvents);
   bindTierBoardReorderEvents();
   renderMoveSelection();
+  hydrateIcons();
 }
 
 function renderWorldcup(room) {
@@ -1084,6 +1195,7 @@ function renderWorldcup(room) {
       </section>
     `;
     bindWorldcupImages();
+    hydrateIcons();
     return;
   }
 
@@ -1097,6 +1209,7 @@ function renderWorldcup(room) {
         </div>
       </section>
     `;
+    hydrateIcons();
     return;
   }
 
@@ -1130,6 +1243,7 @@ function renderWorldcup(room) {
     });
   });
   bindWorldcupImages();
+  hydrateIcons();
 }
 
 function renderWorldcupChoice(item, worldcup, myVote, isTieBreaking = false) {
@@ -1146,7 +1260,7 @@ function renderWorldcupChoice(item, worldcup, myVote, isTieBreaking = false) {
         <strong title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</strong>
         <span class="room-meta">${voteCount}표${voted ? " · 내 선택" : ""}</span>
         <button type="button" class="button button-accent wide-button" data-worldcup-vote="${escapeHtml(item.id)}"${isTieBreaking ? " disabled" : ""}>
-          선택
+          ${buttonContent(voted ? "check" : "mouse-pointer-click", "선택")}
         </button>
       </div>
     </article>
@@ -1983,6 +2097,22 @@ async function copyRoomLink() {
   }
 }
 
+function confirmDeleteRoom(roomId) {
+  if (!roomId) return;
+  const room =
+    state.currentRoom?.id === roomId
+      ? state.currentRoom
+      : state.rooms.find((entry) => entry.id === roomId);
+  const roomTitle = getRoomDisplayTitle(room || { id: roomId, title: "이 방" });
+  openConfirmDialog({
+    title: "방 삭제",
+    message: `"${roomTitle}"을 삭제합니다. 이 작업은 되돌릴 수 없고, 접속 중인 참가자는 메인 화면으로 돌아갑니다.`,
+    actionLabel: "방 삭제",
+    actionIcon: "trash-2",
+    onConfirm: () => deleteRoom(roomId),
+  });
+}
+
 async function deleteRoom(roomId) {
   if (!roomId) return;
 
@@ -2007,6 +2137,17 @@ async function deleteRoom(roomId) {
   }
 }
 
+function confirmResetRoom() {
+  if (!state.currentRoom) return;
+  openConfirmDialog({
+    title: "방 초기화",
+    message: "현재 방의 배치와 진행 상태를 처음 상태로 되돌립니다. 참가자는 방에 그대로 남습니다.",
+    actionLabel: "초기화",
+    actionIcon: "rotate-ccw",
+    onConfirm: resetRoom,
+  });
+}
+
 async function resetRoom() {
   if (!state.currentRoom) return;
   try {
@@ -2016,6 +2157,27 @@ async function resetRoom() {
   } catch (error) {
     setImportStatus(error.message, true);
   }
+}
+
+function openConfirmDialog({ title, message, actionLabel, actionIcon = "check", onConfirm }) {
+  state.pendingConfirmAction = typeof onConfirm === "function" ? onConfirm : null;
+  els.confirmDialogTitle.textContent = title || "확인";
+  els.confirmDialogMessage.textContent = message || "이 작업을 진행할까요?";
+  els.acceptConfirmDialogButton.innerHTML = buttonContent(actionIcon, actionLabel || "확인");
+  els.confirmDialog.hidden = false;
+  hydrateIcons();
+  requestAnimationFrame(() => els.cancelConfirmDialogButton.focus());
+}
+
+function closeConfirmDialog() {
+  state.pendingConfirmAction = null;
+  els.confirmDialog.hidden = true;
+}
+
+async function acceptConfirmDialog() {
+  const action = state.pendingConfirmAction;
+  closeConfirmDialog();
+  if (action) await action();
 }
 
 function getShareBaseUrl() {

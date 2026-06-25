@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#151312" />
     <title>Multiplay Tier Maker</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="icon" type="image/svg+xml" href="/icons/app-icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/app-icon-192.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/vendor/pretendard/pretendardvariable.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,6 +19,7 @@
       <div class="brand-lockup">
         <h1>
           <button type="button" class="brand-button" id="homeButton">
+            <img class="brand-mark" src="/icons/app-icon.svg" alt="" width="32" height="32" />
             Multiplay Tier Maker
           </button>
         </h1>
@@ -26,62 +27,13 @@
       <form class="profile-strip" id="profileForm">
         <label for="nicknameInput">닉네임</label>
         <input id="nicknameInput" name="nickname" maxlength="18" autocomplete="nickname" placeholder="닉네임" />
-        <button type="submit" class="button button-accent">저장</button>
+        <button type="submit" class="button button-accent"><i data-lucide="check" aria-hidden="true"></i>저장</button>
         <span class="status-pill" id="connectionStatus" aria-live="polite">연결 중</span>
       </form>
     </header>
 
     <main class="app-shell" id="main">
       <aside class="control-rail" aria-label="방">
-        <section class="panel panel-prime" aria-labelledby="discoverTitle">
-          <div class="panel-heading">
-            <span class="coordinate">FIND</span>
-            <h2 id="discoverTitle">템플릿 찾기</h2>
-          </div>
-          <fieldset class="mode-switch" id="gameModeGroup">
-            <legend>게임 종류</legend>
-            <input type="radio" id="modeTierMaker" name="gameMode" value="tiermaker" checked />
-            <label for="modeTierMaker">티어메이커</label>
-            <input type="radio" id="modeWorldcup" name="gameMode" value="worldcup" />
-            <label for="modeWorldcup">이상형월드컵</label>
-          </fieldset>
-          <form class="stack-form" id="templateSearchForm">
-            <label for="templateSearchInput">찾을 주제</label>
-            <input
-              id="templateSearchInput"
-              name="templateSearch"
-              maxlength="80"
-              placeholder="pokemon, animals, kpop..."
-            />
-            <button type="submit" class="button button-accent wide-button">검색해서 고르기</button>
-          </form>
-          <p class="rail-note" id="templateSearchStatus" aria-live="polite">
-            TierMaker 템플릿 이름을 검색하고 결과에서 바로 방을 열 수 있습니다.
-          </p>
-          <div class="template-preview" id="templatePreview" hidden></div>
-          <div class="template-results" id="templateSearchResults"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="createTitle">
-          <div class="panel-heading">
-            <span class="coordinate">DIRECT</span>
-            <h2 id="createTitle">직접 가져오기</h2>
-          </div>
-          <form class="stack-form" id="createRoomForm">
-            <label for="tierUrlInput" id="sourceUrlLabel">TierMaker 링크</label>
-            <textarea
-              id="tierUrlInput"
-              rows="3"
-              spellcheck="false"
-              placeholder="https://tiermaker.com/create/..."
-            ></textarea>
-            <button type="submit" class="button button-ghost wide-button">링크로 방 열기</button>
-          </form>
-          <p class="rail-note" id="importStatus" aria-live="polite">
-            검색 결과에 없는 템플릿만 링크로 직접 열어주세요.
-          </p>
-        </section>
-
         <section class="panel" aria-labelledby="roomListTitle">
           <div class="panel-heading row-heading">
             <div>
@@ -89,10 +41,83 @@
               <h2 id="roomListTitle">현재 열린 방</h2>
             </div>
             <button type="button" class="icon-button" id="refreshRoomsButton" aria-label="방 목록 새로고침">
-              ↻
+              <i data-lucide="rotate-cw" aria-hidden="true"></i>
             </button>
           </div>
           <div class="room-list" id="roomList"></div>
+        </section>
+
+        <section class="panel panel-prime create-panel" aria-labelledby="createToolsTitle">
+          <div class="panel-heading">
+            <span class="coordinate">CREATE</span>
+            <h2 id="createToolsTitle">방 만들기</h2>
+          </div>
+          <div class="create-tabs" role="tablist" aria-label="방 만들기 방식">
+            <button
+              type="button"
+              class="create-tab is-active"
+              id="searchTab"
+              role="tab"
+              aria-selected="true"
+              aria-controls="searchPanel"
+              data-create-tab="search"
+            >
+              <i data-lucide="search" aria-hidden="true"></i>템플릿 찾기
+            </button>
+            <button
+              type="button"
+              class="create-tab"
+              id="directTab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="directPanel"
+              data-create-tab="direct"
+            >
+              <i data-lucide="link" aria-hidden="true"></i>직접 가져오기
+            </button>
+          </div>
+          <div class="create-tab-panels">
+            <div class="create-tab-panel" id="searchPanel" role="tabpanel" aria-labelledby="searchTab">
+              <fieldset class="mode-switch" id="gameModeGroup">
+                <legend>게임 종류</legend>
+                <input type="radio" id="modeTierMaker" name="gameMode" value="tiermaker" checked />
+                <label for="modeTierMaker"><i data-lucide="rows-3" aria-hidden="true"></i>티어메이커</label>
+                <input type="radio" id="modeWorldcup" name="gameMode" value="worldcup" />
+                <label for="modeWorldcup"><i data-lucide="trophy" aria-hidden="true"></i>이상형월드컵</label>
+              </fieldset>
+              <form class="stack-form" id="templateSearchForm">
+                <label for="templateSearchInput">찾을 주제</label>
+                <input
+                  id="templateSearchInput"
+                  name="templateSearch"
+                  maxlength="80"
+                  placeholder="pokemon, animals, kpop..."
+                />
+                <button type="submit" class="button button-accent wide-button"><i data-lucide="search" aria-hidden="true"></i>검색해서 고르기</button>
+              </form>
+              <p class="rail-note" id="templateSearchStatus" aria-live="polite">
+                TierMaker 템플릿 이름을 검색하고 결과에서 바로 방을 열 수 있습니다.
+              </p>
+              <div class="template-preview" id="templatePreview" hidden></div>
+              <div class="template-results" id="templateSearchResults"></div>
+            </div>
+
+            <div class="create-tab-panel" id="directPanel" role="tabpanel" aria-labelledby="directTab" hidden>
+              <form class="stack-form" id="createRoomForm">
+                <label for="tierUrlInput" id="sourceUrlLabel">TierMaker 링크</label>
+                <textarea
+                  id="tierUrlInput"
+                  rows="3"
+                  spellcheck="false"
+                  placeholder="https://tiermaker.com/create/..."
+                ></textarea>
+                <button type="submit" class="button button-ghost wide-button"><i data-lucide="link" aria-hidden="true"></i>링크로 방 열기</button>
+              </form>
+              <p class="rail-note" id="importStatus" aria-live="polite">
+                검색 결과에 없는 템플릿만 링크로 직접 열어주세요.
+              </p>
+            </div>
+          </div>
         </section>
 
       </aside>
@@ -103,25 +128,30 @@
             <span class="coordinate" id="roomCodeLabel">NO ROOM</span>
             <h2 id="workspaceTitle">방을 선택하거나 새로 만드세요</h2>
           </div>
-          <div class="toolbar-actions">
+          <div class="toolbar-actions" id="toolbarActions" hidden>
             <span class="copy-status" id="copyStatus" aria-live="polite"></span>
             <div class="zoom-control" aria-label="보드 확대/축소">
-              <button type="button" class="icon-button zoom-button" id="zoomOutButton" aria-label="보드 축소" disabled>−</button>
+              <button type="button" class="icon-button zoom-button" id="zoomOutButton" aria-label="보드 축소" disabled><i data-lucide="zoom-out" aria-hidden="true"></i></button>
               <span class="zoom-level" id="zoomLevelLabel" aria-live="polite">100%</span>
-              <button type="button" class="icon-button zoom-button" id="zoomInButton" aria-label="보드 확대" disabled>+</button>
+              <button type="button" class="icon-button zoom-button" id="zoomInButton" aria-label="보드 확대" disabled><i data-lucide="zoom-in" aria-hidden="true"></i></button>
             </div>
-            <button type="button" class="button button-ghost" id="addImageButton" disabled>이미지 추가</button>
-            <button type="button" class="button button-ghost" id="addTierButton" disabled>티어 추가</button>
-            <button type="button" class="button button-ghost" id="saveImageButton" disabled>저장하기</button>
-            <button type="button" class="button button-ghost" id="copyRoomButton" disabled>초대 링크</button>
-            <button type="button" class="button button-danger" id="resetRoomButton" disabled>초기화</button>
-            <button type="button" class="button button-danger" id="deleteRoomButton" disabled>방 삭제</button>
+            <button type="button" class="button button-ghost" id="addImageButton" disabled><i data-lucide="image-plus" aria-hidden="true"></i>이미지 추가</button>
+            <button type="button" class="button button-ghost" id="addTierButton" disabled><i data-lucide="list-plus" aria-hidden="true"></i>티어 추가</button>
+            <button type="button" class="button button-ghost" id="saveImageButton" disabled><i data-lucide="download" aria-hidden="true"></i>저장하기</button>
+            <button type="button" class="button button-ghost" id="copyRoomButton" disabled><i data-lucide="send" aria-hidden="true"></i>초대 링크</button>
+            <button type="button" class="button button-danger" id="resetRoomButton" disabled><i data-lucide="rotate-ccw" aria-hidden="true"></i>초기화</button>
+            <button type="button" class="button button-danger" id="deleteRoomButton" disabled><i data-lucide="trash-2" aria-hidden="true"></i>방 삭제</button>
           </div>
         </div>
 
         <input type="file" id="imageUploadInput" accept="image/*" hidden />
 
         <div class="room-player-strip" id="playerList" aria-label="현재 방 참가자" hidden></div>
+
+        <div class="room-status-toast" id="roomStatusToast" aria-live="polite" hidden>
+          <span id="roomStatusText"></span>
+          <button type="button" class="icon-button" id="closeRoomStatusButton" aria-label="상태 메시지 닫기"><i data-lucide="x" aria-hidden="true"></i></button>
+        </div>
 
         <div class="empty-state" id="emptyState">
           <span class="coordinate">READY</span>
@@ -160,7 +190,7 @@
       <figure class="lightbox-panel" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
         <div class="lightbox-toolbar">
           <figcaption id="lightboxTitle">이미지</figcaption>
-          <button type="button" class="icon-button" id="closeLightboxButton" aria-label="닫기">×</button>
+          <button type="button" class="icon-button" id="closeLightboxButton" aria-label="닫기"><i data-lucide="x" aria-hidden="true"></i></button>
         </div>
         <img id="lightboxImage" alt="" />
       </figure>
@@ -171,18 +201,34 @@
       <form class="tier-dialog-panel" id="tierDialogForm" role="dialog" aria-modal="true" aria-labelledby="tierDialogTitle">
         <div class="dialog-toolbar">
           <h2 id="tierDialogTitle">티어 추가</h2>
-          <button type="button" class="icon-button" id="cancelTierDialogButton" aria-label="닫기">×</button>
+          <button type="button" class="icon-button" id="cancelTierDialogButton" aria-label="닫기"><i data-lucide="x" aria-hidden="true"></i></button>
         </div>
         <label for="tierNameInput">티어 이름</label>
         <input id="tierNameInput" name="tierName" maxlength="32" autocomplete="off" />
         <p class="dialog-note" id="tierDialogStatus" aria-live="polite"></p>
         <div class="dialog-actions">
-          <button type="submit" class="button button-accent wide-button">추가</button>
+          <button type="submit" class="button button-accent wide-button"><i data-lucide="check" aria-hidden="true"></i>추가</button>
         </div>
       </form>
     </div>
 
+    <div class="confirm-dialog" id="confirmDialog" hidden>
+      <button type="button" class="dialog-backdrop" id="closeConfirmDialogBackdrop" aria-label="확인 창 닫기"></button>
+      <section class="confirm-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogMessage">
+        <div class="dialog-toolbar">
+          <h2 id="confirmDialogTitle">확인</h2>
+          <button type="button" class="icon-button" id="closeConfirmDialogButton" aria-label="닫기"><i data-lucide="x" aria-hidden="true"></i></button>
+        </div>
+        <p class="dialog-note" id="confirmDialogMessage"></p>
+        <div class="dialog-actions">
+          <button type="button" class="button button-ghost" id="cancelConfirmDialogButton"><i data-lucide="x" aria-hidden="true"></i>취소</button>
+          <button type="button" class="button button-danger" id="acceptConfirmDialogButton"><i data-lucide="check" aria-hidden="true"></i>확인</button>
+        </div>
+      </section>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/vendor/lucide/lucide.min.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

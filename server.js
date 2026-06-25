@@ -88,6 +88,16 @@ app.use((req, res, next) => {
   next();
 });
 app.use(
+  "/vendor/lucide",
+  express.static(path.join(__dirname, "node_modules", "lucide", "dist", "umd"), {
+    etag: false,
+    maxAge: 0,
+    setHeaders: (res) => {
+      res.setHeader("cache-control", "no-store");
+    },
+  })
+);
+app.use(
   express.static(path.join(__dirname, "public"), {
     etag: false,
     maxAge: 0,

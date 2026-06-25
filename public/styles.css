@@ -22,6 +22,8 @@
   --tier-item-size: 72px;
   --board-zoom: 1;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --font-ui: "Pretendard Variable", Pretendard, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   color-scheme: dark;
 }
 
@@ -40,7 +42,7 @@ body {
   min-height: 100svh;
   margin: 0;
   color: var(--fg-main);
-  font-family: "Barlow", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   background:
     linear-gradient(90deg, rgba(246, 239, 227, 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
     linear-gradient(180deg, rgba(246, 239, 227, 0.025) 1px, transparent 1px) 0 0 / 48px 48px,
@@ -117,6 +119,9 @@ img {
 }
 
 .brand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   min-height: 44px;
   margin: 0;
   padding: 0;
@@ -131,11 +136,19 @@ img {
   color: var(--accent-teal);
 }
 
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(246, 239, 227, 0.14);
+}
+
 .coordinate {
   display: block;
   margin-bottom: 4px;
   color: var(--accent-teal);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0;
@@ -208,8 +221,29 @@ select {
 }
 
 .icon-button {
+  display: inline-grid;
+  place-items: center;
   width: 44px;
   font-size: 1.15rem;
+}
+
+.button svg,
+.icon-button svg,
+.brand-button svg,
+.create-tab svg,
+.mode-switch label svg,
+.room-card strong svg,
+.template-preview-loading svg,
+.tier-drag-icon svg {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  stroke-width: 2.25;
+}
+
+.button svg {
+  width: 1.05em;
+  height: 1.05em;
 }
 
 .button:hover,
@@ -253,7 +287,7 @@ select {
   border: 1px solid var(--line-soft);
   border-radius: 999px;
   color: var(--fg-soft);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   background: rgba(17, 16, 15, 0.72);
 }
@@ -339,6 +373,59 @@ body.room-mode .control-rail {
   gap: var(--space);
 }
 
+.create-panel {
+  display: grid;
+  gap: calc(var(--space) * 1.5);
+}
+
+.create-panel .panel-heading {
+  margin-bottom: 0;
+}
+
+.create-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(17, 16, 15, 0.58);
+}
+
+.create-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg-soft);
+  background: transparent;
+  font-weight: 800;
+}
+
+.create-tab.is-active {
+  border-color: rgba(45, 212, 191, 0.55);
+  color: #061311;
+  background: var(--accent-teal);
+}
+
+.create-tab:focus-visible {
+  outline: 3px solid var(--accent-sun);
+  outline-offset: 2px;
+}
+
+.create-tab-panels {
+  min-width: 0;
+}
+
+.create-tab-panel {
+  min-width: 0;
+}
+
 .mode-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -361,13 +448,18 @@ body.room-mode .control-rail {
 
 .mode-switch input {
   position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 1px;
   opacity: 0;
   pointer-events: none;
 }
 
 .mode-switch label {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 40px;
   padding: 8px;
   border: 1px solid transparent;
@@ -588,7 +680,7 @@ body.room-mode .control-rail {
   justify-content: space-between;
   gap: var(--space);
   color: var(--fg-muted);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -634,7 +726,9 @@ body.room-mode .control-rail {
 }
 
 .room-card strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -647,7 +741,7 @@ body.room-mode .control-rail {
 .room-meta,
 .player-meta {
   color: var(--fg-muted);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -655,6 +749,36 @@ body.room-mode .control-rail {
   padding: 10px calc(var(--space) * 2);
   border-bottom: 1px solid var(--line-soft);
   background: rgba(17, 16, 15, 0.42);
+}
+
+.room-status-toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: var(--space);
+  margin: calc(var(--space) * 1.5) calc(var(--space) * 2) 0;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid rgba(45, 212, 191, 0.34);
+  border-radius: var(--radius);
+  color: var(--fg-soft);
+  background: rgba(17, 16, 15, 0.72);
+}
+
+.room-status-toast.is-error {
+  border-color: rgba(251, 113, 133, 0.55);
+  color: #ffe4ea;
+  background: rgba(251, 113, 133, 0.1);
+}
+
+.room-status-toast span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.room-status-toast .icon-button {
+  width: 36px;
+  min-height: 36px;
 }
 
 .room-participants,
@@ -668,7 +792,7 @@ body.room-mode .control-rail {
 .room-participants.is-empty,
 .room-card-participants.is-empty {
   color: var(--fg-muted);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
 }
 
@@ -743,7 +867,7 @@ body.room-mode .control-rail {
 
 .zoom-level {
   color: var(--fg-soft);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 800;
   text-align: center;
@@ -752,7 +876,7 @@ body.room-mode .control-rail {
 .copy-status {
   min-height: 20px;
   color: var(--accent-teal);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -951,7 +1075,7 @@ body.room-mode .control-rail {
   border-radius: 4px;
   color: #080807;
   background: var(--active-color);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
   font-weight: 800;
   line-height: 1.2;
@@ -1095,7 +1219,7 @@ body.room-mode .control-rail {
   border-radius: 999px;
   color: var(--fg-soft);
   background: rgba(17, 16, 15, 0.48);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -1134,7 +1258,7 @@ body.room-mode .control-rail {
     inset 0 0 0 6px rgba(255, 255, 255, 0.24),
     0 10px 24px rgba(0, 0, 0, 0.28);
   backface-visibility: hidden;
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 1.35rem;
   font-weight: 900;
 }
@@ -1163,7 +1287,7 @@ body.room-mode .control-rail {
 .worldcup-random-result {
   opacity: 0;
   color: var(--accent-teal) !important;
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 1.02rem;
   font-weight: 800;
   animation: randomReveal 1.8s ease forwards;
@@ -1305,7 +1429,8 @@ body.room-mode .control-rail {
 }
 
 .image-lightbox,
-.tier-dialog {
+.tier-dialog,
+.confirm-dialog {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -1325,7 +1450,8 @@ body.room-mode .control-rail {
 }
 
 .lightbox-panel,
-.tier-dialog-panel {
+.tier-dialog-panel,
+.confirm-dialog-panel {
   position: relative;
   z-index: 1;
   display: grid;
@@ -1343,7 +1469,8 @@ body.room-mode .control-rail {
   width: min(92vw, 900px);
 }
 
-.tier-dialog-panel {
+.tier-dialog-panel,
+.confirm-dialog-panel {
   width: min(92vw, 420px);
 }
 
@@ -1362,7 +1489,7 @@ body.room-mode .control-rail {
 
 .lightbox-toolbar figcaption {
   color: var(--fg-soft);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   font-weight: 700;
 }
@@ -1419,7 +1546,7 @@ body.room-mode .control-rail {
   border-radius: 999px;
   color: #080807;
   background: var(--cursor-color);
-  font-family: "JetBrains Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   white-space: nowrap;
@@ -1699,7 +1826,8 @@ body.room-mode .control-rail {
   }
 
   .lightbox-panel,
-  .tier-dialog-panel {
+  .tier-dialog-panel,
+  .confirm-dialog-panel {
     width: min(94vw, 420px);
     max-height: 90svh;
   }

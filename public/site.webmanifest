@@ -1,0 +1,23 @@
+{
+  "name": "Multiplay Tier Maker",
+  "short_name": "MultiTier",
+  "description": "Realtime multiplayer tier maker and ideal worldcup rooms.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#151312",
+  "theme_color": "#151312",
+  "icons": [
+    {
+      "src": "/icons/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

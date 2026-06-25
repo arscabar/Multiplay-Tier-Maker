@@ -13,7 +13,7 @@ npm start
 
 ## 템플릿 찾기
 
-첫 화면에서 게임 종류를 고른 뒤 검색어나 원본 링크로 방을 만듭니다.
+첫 화면에서는 현재 열린 방이 먼저 보이고, 그 아래 `방 만들기` 영역에서 `템플릿 찾기`와 `직접 가져오기` 탭을 전환해 방을 만듭니다.
 
 - `티어메이커`: TierMaker 검색 결과나 `tiermaker.com/create/...` 링크를 가져옵니다.
 - `이상형월드컵`: PIKU 검색 결과나 `piku.co.kr/w/...` 링크를 가져옵니다.
@@ -90,6 +90,8 @@ npm run cloudflared:install
 
 - 닉네임 저장 후 방 입장
 - 현재 열린 방 목록
+- 현재 열린 방을 먼저 보여주는 홈 화면
+- 템플릿 찾기 / 직접 가져오기 탭
 - 게임 종류 선택: 티어메이커 / 이상형월드컵
 - 검색어로 TierMaker 템플릿 또는 PIKU 월드컵 찾기
 - `tiermaker.com/create/...` 링크로 방 생성
@@ -115,6 +117,8 @@ npm run cloudflared:install
 - 방 생성이 오래 걸릴 때 진행률 표시
 - 모바일 보드 줌 조절
 - 모바일 월드컵 화면에서 후보 2개를 좌우 배치로 표시
+- Pretendard 기반 한국어 UI 폰트와 Lucide 아이콘 적용
+- 웹 favicon, 모바일 홈 아이콘, Windows 런처 아이콘 포함
 
 TierMaker가 서버 요청을 Cloudflare로 막는 경우가 있어, importer는 직접 HTML 요청 후 Jina Reader 마크다운 경유 파싱을 시도합니다. PIKU 월드컵은 랭킹 데이터와 원본 시작 페이지에서 후보, 이미지, N강 옵션을 가져옵니다.
 
