@@ -7,7 +7,23 @@ const string CloudflaredDownloadsPageUrl = "https://developers.cloudflare.com/cl
 
 Process? serverProcess = null;
 Process? tunnelProcess = null;
-var appRoot = FindAppRoot();
+string appRoot;
+
+try
+{
+    appRoot = FindAppRoot();
+}
+catch (Exception error)
+{
+    Console.Title = "Multiplay Tier Maker";
+    Console.WriteLine("Multiplay Tier Maker launcher");
+    Console.WriteLine(error.Message);
+    Console.WriteLine("EXE 파일만 따로 실행하면 서버 파일을 찾을 수 없습니다.");
+    Console.WriteLine("릴리즈 ZIP을 받은 뒤 압축을 모두 풀고, 그 폴더 안의 MultiplayTierMaker.exe를 실행하세요.");
+    Console.ReadLine();
+    return;
+}
+
 var publicUrlPath = Path.Combine(appRoot, ".omx", "public-base-url.txt");
 var cloudflaredPathStorePath = Path.Combine(appRoot, ".omx", "cloudflared-path.txt");
 Directory.CreateDirectory(Path.GetDirectoryName(publicUrlPath)!);
@@ -17,16 +33,19 @@ Console.Title = "Multiplay Tier Maker";
 Console.WriteLine("Multiplay Tier Maker launcher");
 Console.WriteLine($"Project: {appRoot}");
 
-if (!CommandExists("node"))
+var nodePath = ResolveNodePath(appRoot);
+if (nodePath is null)
 {
-    Console.WriteLine("Node.js를 찾지 못했습니다. Node.js 설치 후 다시 실행해주세요.");
+    Console.WriteLine("Node.js를 찾지 못했습니다.");
+    Console.WriteLine("포터블 릴리즈 ZIP에는 tools\\node\\node.exe가 포함되어야 합니다.");
+    Console.WriteLine("직접 실행하는 경우 Node.js 20 이상을 설치하거나 MULTIPLAY_NODE_PATH로 node.exe 경로를 지정하세요.");
     Console.ReadLine();
     return;
 }
 
 if (!await IsHealthy())
 {
-    serverProcess = StartProcess("node", "server.js", appRoot, redirectOutput: false);
+    serverProcess = StartProcess(nodePath, "server.js", appRoot, redirectOutput: false);
     Console.WriteLine("Starting local web server...");
     if (!await WaitForHealth(TimeSpan.FromSeconds(12)))
     {
@@ -119,9 +138,24 @@ static Process StartProcess(string fileName, string arguments, string workingDir
     return Process.Start(info) ?? throw new InvalidOperationException($"{fileName} 실행에 실패했습니다.");
 }
 
-static bool CommandExists(string command)
+static string? ResolveNodePath(string appRoot)
 {
-    return FindCommandPath(command) is not null;
+    var candidates = new[]
+    {
+        Environment.GetEnvironmentVariable("MULTIPLAY_NODE_PATH"),
+        Path.Combine(appRoot, "tools", "node", "node.exe"),
+        Path.Combine(appRoot, "node", "node.exe"),
+        Path.Combine(AppContext.BaseDirectory, "node.exe"),
+        FindCommandPath("node"),
+    };
+
+    foreach (var candidate in candidates)
+    {
+        var path = CleanPath(candidate);
+        if (path is not null && File.Exists(path)) return path;
+    }
+
+    return null;
 }
 
 static string? ResolveCloudflaredPath(string appRoot, string pathStorePath)

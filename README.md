@@ -22,7 +22,9 @@ npm start
 
 ## Windows 런처
 
-빌드된 실행 파일은 `dist\MultiplayTierMaker.exe`에 생성됩니다.
+릴리즈에서는 `MultiplayTierMaker-v...-win-x64.zip`을 내려받아 압축을 모두 푼 뒤, 그 폴더 안의 `MultiplayTierMaker.exe`를 실행합니다. EXE 파일만 따로 복사해서 실행하면 `server.js`, `public`, `node_modules` 같은 서버 파일을 찾지 못하므로 정상 실행되지 않습니다.
+
+로컬에서 빌드하면 실행 파일은 `dist\MultiplayTierMaker.exe`에, 다른 PC로 옮길 수 있는 포터블 ZIP은 `dist\MultiplayTierMaker-v...-win-x64.zip`에 생성됩니다.
 
 실행하면 로컬 웹서버를 켜고 브라우저를 자동으로 엽니다. PC 밖 친구와 바로 테스트하려면 Cloudflare Tunnel 주소가 필요합니다. 런처는 `cloudflared`를 다음 순서로 찾습니다.
 
@@ -33,6 +35,8 @@ npm start
 5. Windows PATH의 `cloudflared`
 
 찾지 못하면 EXE 화면에서 자동 다운로드, 직접 경로 입력, 로컬만 실행 중 하나를 선택할 수 있습니다. 공개 주소가 만들어지면 초대 링크도 그 주소를 사용합니다.
+
+포터블 ZIP에는 Node 실행 파일이 포함되므로 별도 Node.js 설치 없이 실행할 수 있습니다. 빌드 PC에 `cloudflared`가 설치되어 있으면 ZIP의 `tools\cloudflared.exe`에도 함께 들어갑니다.
 
 ```powershell
 npm run build:launcher
