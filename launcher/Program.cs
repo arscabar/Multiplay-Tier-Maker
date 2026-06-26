@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.RegularExpressions;
 
-const int PreferredPort = 3000;
+const int PreferredPort = 8000;
 const string CloudflaredDownloadUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 const string CloudflaredDownloadsPageUrl = "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/";
 
@@ -35,7 +35,7 @@ Console.Title = "Multiplay Tier Maker";
 Console.WriteLine("Multiplay Tier Maker launcher");
 Console.WriteLine($"Project: {appRoot}");
 
-var localPort = await ResolveLocalPort(PreferredPort);
+var localPort = PreferredPort;
 var localUrl = $"http://localhost:{localPort}";
 
 var nodePath = ResolveNodePath(appRoot);
@@ -48,23 +48,27 @@ if (nodePath is null)
     return;
 }
 
-if (!await IsHealthy(localUrl))
+ReleasePort(localPort);
+if (!IsPortAvailable(localPort))
 {
-    serverProcess = StartProcess(
-        nodePath,
-        "server.js",
-        appRoot,
-        redirectOutput: false,
-        new Dictionary<string, string> { ["PORT"] = localPort.ToString() }
-    );
-    Console.WriteLine("Starting local web server...");
-    if (!await WaitForHealth(localUrl, TimeSpan.FromSeconds(12)))
-    {
-        Console.WriteLine($"서버 시작에 실패했습니다. 포트 {localPort} 사용 상태를 확인해주세요.");
-        Cleanup();
-        Console.ReadLine();
-        return;
-    }
+    Console.WriteLine($"포트 {localPort}을 비우지 못했습니다. 관리자 권한이 필요하거나 보호된 프로세스가 사용 중일 수 있습니다.");
+    Console.ReadLine();
+    return;
+}
+serverProcess = StartProcess(
+    nodePath,
+    "server.js",
+    appRoot,
+    redirectOutput: false,
+    new Dictionary<string, string> { ["PORT"] = localPort.ToString() }
+);
+Console.WriteLine("Starting local web server...");
+if (!await WaitForHealth(localUrl, TimeSpan.FromSeconds(12)))
+{
+    Console.WriteLine($"서버 시작에 실패했습니다. 포트 {localPort} 사용 상태를 확인해주세요.");
+    Cleanup();
+    Console.ReadLine();
+    return;
 }
 
 Console.WriteLine($"Local URL: {localUrl}");
@@ -337,18 +341,6 @@ static string? FindCommandPath(string command)
     return null;
 }
 
-static async Task<int> ResolveLocalPort(int preferredPort)
-{
-    for (var port = preferredPort; port < preferredPort + 30; port++)
-    {
-        var localUrl = $"http://localhost:{port}";
-        if (await IsHealthy(localUrl)) return port;
-        if (IsPortAvailable(port)) return port;
-    }
-
-    throw new InvalidOperationException($"{preferredPort}~{preferredPort + 29} 포트 중 사용할 수 있는 포트를 찾지 못했습니다.");
-}
-
 static bool IsPortAvailable(int port)
 {
     try
@@ -360,6 +352,109 @@ static bool IsPortAvailable(int port)
     catch
     {
         return false;
+    }
+}
+
+static void ReleasePort(int port, bool quiet = false)
+{
+    var listenerPids = GetPortListenerProcessIds(port)
+        .Where((pid) => pid > 0 && pid != Environment.ProcessId)
+        .Distinct()
+        .ToList();
+
+    if (listenerPids.Count == 0)
+    {
+        if (!quiet) Console.WriteLine($"Port {port} is available.");
+        return;
+    }
+
+    if (!quiet)
+    {
+        Console.WriteLine($"Port {port} is already in use. Stopping {listenerPids.Count} listener process(es)...");
+    }
+
+    foreach (var pid in listenerPids)
+    {
+        TryKillProcessById(pid, quiet);
+    }
+
+    var until = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+    while (DateTime.UtcNow < until)
+    {
+        if (GetPortListenerProcessIds(port).Count == 0 && IsPortAvailable(port)) return;
+        Thread.Sleep(250);
+    }
+
+    if (!quiet)
+    {
+        Console.WriteLine($"Port {port} is still busy after cleanup.");
+    }
+}
+
+static List<int> GetPortListenerProcessIds(int port)
+{
+    try
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = "netstat",
+            Arguments = "-ano -p tcp",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var process = Process.Start(info);
+        if (process is null) return [];
+
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit(3000);
+
+        var pids = new List<int>();
+        foreach (var rawLine in output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var parts = Regex.Split(line, @"\s+");
+            if (parts.Length < 5) continue;
+            if (!parts[3].Equals("LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!EndpointUsesPort(parts[1], port)) continue;
+            if (int.TryParse(parts[4], out var pid)) pids.Add(pid);
+        }
+        return pids;
+    }
+    catch
+    {
+        return [];
+    }
+}
+
+static bool EndpointUsesPort(string endpoint, int port)
+{
+    var lastColon = endpoint.LastIndexOf(':');
+    if (lastColon < 0 || lastColon >= endpoint.Length - 1) return false;
+    return int.TryParse(endpoint[(lastColon + 1)..], out var endpointPort) && endpointPort == port;
+}
+
+static void TryKillProcessById(int pid, bool quiet = false)
+{
+    try
+    {
+        using var process = Process.GetProcessById(pid);
+        if (!quiet)
+        {
+            Console.WriteLine($"Stopping PID {pid} ({process.ProcessName})...");
+        }
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit(5000);
+    }
+    catch (Exception error)
+    {
+        if (!quiet)
+        {
+            Console.WriteLine($"PID {pid} 종료 실패: {error.Message}");
+        }
     }
 }
 
@@ -458,6 +553,7 @@ void Cleanup()
 {
     TryKill(tunnelProcess);
     TryKill(serverProcess);
+    ReleasePort(PreferredPort, quiet: true);
     TryDelete(publicUrlPath);
 }
 

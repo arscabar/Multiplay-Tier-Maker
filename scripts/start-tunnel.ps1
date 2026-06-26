@@ -4,6 +4,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $pathStore = Join-Path $root ".omx\cloudflared-path.txt"
 $downloadTarget = Join-Path $root ".omx\cloudflared.exe"
 $downloadsPage = "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+$port = if ($env:PORT) { [string]$env:PORT } else { "8000" }
 
 function Clean-PathValue([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) {
@@ -78,4 +79,4 @@ if (-not $cloudflared) {
 
 Write-Host "Using cloudflared:"
 Write-Host $cloudflared
-& $cloudflared tunnel --url http://localhost:3000
+& $cloudflared tunnel --url "http://localhost:$port"

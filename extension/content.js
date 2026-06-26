@@ -1,6 +1,6 @@
 (() => {
   const PANEL_ID = "multi-tier-maker-extension-panel";
-  const DEFAULT_SERVER_URL = "http://localhost:3000";
+  const DEFAULT_SERVER_URL = "http://localhost:8000";
   const templateImagePattern = /tiermaker\.com\/images\/+(?:media\/)?template_images\//i;
 
   if (document.getElementById(PANEL_ID)) return;

@@ -1,6 +1,6 @@
 const { io } = require("socket.io-client");
 
-const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:3000";
+const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:8000";
 const sampleUrl = process.env.SMOKE_PIKU_URL || "https://www.piku.co.kr/w/1bzrmf";
 const searchTerm = process.env.SMOKE_PIKU_QUERY || "온라인 게임";
 

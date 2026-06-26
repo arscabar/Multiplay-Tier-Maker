@@ -1,6 +1,6 @@
 const { io } = require("socket.io-client");
 
-const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:3000";
+const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:8000";
 const candidates = [
   "https://tiermaker.com/create/---17780109",
   "https://tiermaker.com/create/anime-tier-list-210-animes-149921",

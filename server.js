@@ -8,7 +8,7 @@ const express = require("express");
 const cheerio = require("cheerio");
 const { Server } = require("socket.io");
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 8000);
 const PLAYER_COLORS = [
   "#2dd4bf",
   "#f9734d",

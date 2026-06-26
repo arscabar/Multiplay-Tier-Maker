@@ -16,4 +16,4 @@ TierMaker `create/...` 페이지 오른쪽에 플로팅 메뉴를 띄워 현재 
 3. 오른쪽 `Multiplay Tier Maker` 패널에서 서버 주소를 확인합니다.
 4. `현재 템플릿 적용`을 누릅니다.
 
-서버 주소 기본값은 `http://localhost:3000`입니다. Cloudflare Tunnel이나 Render 주소를 쓰는 경우 패널의 서버 주소를 해당 URL로 바꿉니다.
+서버 주소 기본값은 `http://localhost:8000`입니다. Cloudflare Tunnel이나 Render 주소를 쓰는 경우 패널의 서버 주소를 해당 URL로 바꿉니다.
